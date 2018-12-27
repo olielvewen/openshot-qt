@@ -5,7 +5,7 @@
 
  @section LICENSE
 
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -68,7 +68,7 @@ try:
         linux_distro = "-".join(platform.linux_distribution())
 
 except Exception as Ex:
-    log.error("Error determing OS version in metrics.py")
+    log.error("Error determining OS version in metrics.py")
 
 # Build user-agent
 user_agent = "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/37.0.2062.120 Safari/537.36" % os_version
@@ -154,8 +154,8 @@ def send_metric(params):
 
         # Send metric HTTP data
         try:
-            r = requests.get(url, headers={"user-agent": user_agent})
-            log.info("Track metric: [%s] %s | %s" % (r.status_code, r.url, r.text))
+            r = requests.get(url, headers={"user-agent": user_agent}, verify=False)
+            log.info("Track metric: [%s] %s | (%s bytes)" % (r.status_code, r.url, len(r.content)))
 
         except Exception as Ex:
             log.error("Failed to Track metric: %s" % (Ex))
@@ -174,7 +174,7 @@ def send_exception(stacktrace, source):
 
         # Send exception HTTP data
         try:
-            r = requests.post(url, data=data, headers={"user-agent": user_agent, "content-type": "application/x-www-form-urlencoded"})
+            r = requests.post(url, data=data, headers={"user-agent": user_agent, "content-type": "application/x-www-form-urlencoded"}, verify=False)
             log.info("Track exception: [%s] %s | %s" % (r.status_code, r.url, r.text))
 
         except Exception as Ex:

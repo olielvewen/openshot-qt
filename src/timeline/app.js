@@ -6,7 +6,7 @@
  *
  * @section LICENSE
  *
- * Copyright (c) 2008-2014 OpenShot Studios, LLC
+ * Copyright (c) 2008-2018 OpenShot Studios, LLC
  * <http://www.openshotstudios.com/>. This file is part of
  * OpenShot Video Editor, an open-source project dedicated to
  * delivering high quality video editing and animation solutions to the
@@ -55,6 +55,7 @@ var App = angular.module('openshot-timeline', ['ui.bootstrap','ngAnimate']);
 	if(typeof timeline != 'undefined') {
 		timeline.qt_log("Qt Found!");
 		$('body').scope().EnableQt();
+		timeline.page_ready();
 	} else {
 		console.log("Qt NOT Found!");
 	}

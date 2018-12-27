@@ -27,16 +27,19 @@ the Title menu (located in the main menu of OpenShot) to launch the Title Editor
 Overview
 --------
 
-.. image:: _static/title-editor.jpg
+.. image:: images/title-editor.jpg
 
-==  ==================  ============
-#   Name                Description
-==  ==================  ============
-1   Choose a Template   Choose from any available vector title template
-2   Preview Title       Preview your title as you make changes
-3   Title Properties    Change the text, colors, or edit in an advanced SVG image editor (such as Inkscape)
-3   Save                Save and add the title to your project
-==  ==================  ============
+.. table::
+     :widths: 5 26
+
+     ==  ==================  ============
+     #   Name                Description
+     ==  ==================  ============
+     1   Choose a Template   Choose from any available vector title template
+     2   Preview Title       Preview your title as you make changes
+     3   Title Properties    Change the text, colors, or edit in an advanced SVG image editor (such as Inkscape)
+     4   Save                Save and add the title to your project
+     ==  ==================  ============
 
 Custom Titles
 -------------
@@ -49,7 +52,7 @@ files in your **Project Files** panel, and choose **Edit Title** or **Duplicate 
 Adding a 3D animated title is just as easy, using our **Animated Title** dialog. Use the Title menu (located
 in the main menu of OpenShot) to launch the Animated Title editor. You can also use the keyboard shortcut **Ctrl+B**.
 
-.. image:: _static/animated-title.jpg
+.. image:: images/animated-title.jpg
 
 ==  ==================  ============
 #   Name                Description
@@ -57,7 +60,7 @@ in the main menu of OpenShot) to launch the Animated Title editor. You can also 
 1   Choose a Template   Choose from any available 3D title templates
 2   Preview Title       Preview your title as you make changes
 3   Title Properties    Change the text, colors, and advanced properties
-3   Render              Render the 3D animation, and add it to your project
+4   Render              Render the 3D animation, and add it to your project
 ==  ==================  ============
 
 This feature requires the latest version of Blender (https://www.blender.org/download/) be installed, and the OpenShot

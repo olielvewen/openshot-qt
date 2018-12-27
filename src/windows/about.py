@@ -6,7 +6,7 @@
 
  @section LICENSE
 
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -27,6 +27,7 @@
  """
 
 import os
+import codecs
 from functools import partial
 
 from PyQt5.QtCore import *
@@ -43,6 +44,7 @@ try:
 except ImportError:
     import simplejson as json
 
+import datetime
 
 class About(QDialog):
     """ About Dialog """
@@ -63,6 +65,17 @@ class About(QDialog):
         self.app = get_app()
         _ = self.app._tr
 
+        create_text = _('Create &amp; Edit Amazing Videos and Movies')
+        description_text = _('OpenShot Video Editor 2.x is the next generation of the award-winning <br/>OpenShot video editing platform.')
+        learnmore_text = _('Learn more')
+        copyright_text = _('Copyright &copy; %(begin_year)s-%(current_year)s') % {'begin_year': '2008', 'current_year': str(datetime.datetime.today().year) }
+        about_html = '<html><head/><body><hr/><p align="center"><span style=" font-size:10pt; font-weight:600;">%s</span></p><p align="center"><span style=" font-size:10pt;">%s </span><a href="http://%s.openshot.org?r=about-us"><span style=" font-size:10pt; text-decoration: none; color:#55aaff;">%s</span></a><span style=" font-size:10pt;">.</span></p></body></html>' % (create_text, description_text, info.website_language(), learnmore_text)
+        company_html = '<html><head/><body style="font-size:11pt; font-weight:400; font-style:normal;">\n<hr />\n<p align="center" style=" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-size:10pt; font-weight:600;">%s </span><a href="http://%s.openshotstudios.com?r=about-us"><span style=" font-size:10pt; font-weight:600; text-decoration: none; color:#55aaff;">OpenShot Studios, LLC<br /></span></a></p></body></html>' % (copyright_text, info.website_language())
+
+        # Set description and company labels
+        self.lblAboutDescription.setText(about_html)
+        self.lblAboutCompany.setText(company_html)
+
         # set events handlers
         self.btncredit.clicked.connect(self.load_credit)
         self.btnlicense.clicked.connect(self.load_license)
@@ -75,7 +88,7 @@ class About(QDialog):
         track_metric_screen("about-screen")
 
     def load_credit(self):
-        """ Load Credits for everybody who has contribuated in several domain for Openshot """
+        """ Load Credits for everybody who has contributed in several domain for Openshot """
         log.info('Credit screen has been opened')
         windo = Credits()
         windo.exec_()
@@ -142,8 +155,18 @@ class Credits(QDialog):
         self.app = get_app()
         _ = self.app._tr
 
-        # Add credits listview
-        self.developersListView = CreditsTreeView(credits=info.CREDITS['code'], columns=["email", "website"])
+        # Update supporter button
+        supporter_text = _("Become a Supporter")
+        supporter_html = '<html><head/><body><p align="center"><a href="http://%s.openshot.org/donate/?app-about-us"><span style=" text-decoration: underline; color:#55aaff;">%s</span></a></p></body></html>' % (info.website_language(), supporter_text)
+        self.lblBecomeSupporter.setText(supporter_html)
+
+        # Get list of developers
+        developer_list = []
+        with codecs.open(os.path.join(info.PATH, 'settings', 'contributors.json'), 'r', 'utf-8') as contributors_file:
+            developer_string = contributors_file.read()
+            developer_list = json.loads(developer_string)
+
+        self.developersListView = CreditsTreeView(credits=developer_list, columns=["email", "website"])
         self.vboxDevelopers.addWidget(self.developersListView)
         self.txtDeveloperFilter.textChanged.connect(partial(self.Filter_Triggered, self.txtDeveloperFilter, self.developersListView))
 
@@ -165,12 +188,11 @@ class Credits(QDialog):
             self.vboxTranslators.addWidget(self.translatorsListView)
             self.txtTranslatorFilter.textChanged.connect(partial(self.Filter_Triggered, self.txtTranslatorFilter, self.translatorsListView))
         else:
-            # No translations for this langauge, hide credits
+            # No translations for this language, hide credits
             self.tabCredits.removeTab(1)
 
         # Get list of supporters
         supporter_list = []
-        import codecs
         with codecs.open(os.path.join(info.PATH, 'settings', 'supporters.json'), 'r', 'utf-8') as supporter_file:
             supporter_string = supporter_file.read()
             supporter_list = json.loads(supporter_string)

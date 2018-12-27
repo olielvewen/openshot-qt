@@ -6,7 +6,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -28,6 +28,7 @@
 
 import sys
 import os
+import re
 import shutil
 import functools
 import subprocess
@@ -205,11 +206,26 @@ class TitleEditor(QDialog):
             self.txtFileName.setText(os.path.split(self.edit_file_path)[1])
             self.txtFileName.setEnabled(False)
         else:
+            name = _("TitleFileName-%d")
+            offset = 0
+            if self.duplicate and self.edit_file_path:
+                # Re-use current name
+                name = os.path.split(self.edit_file_path)[1]
+                # Splits the filename into (base-part)(optional "-")(number)(.svg)
+                match = re.match(r"^(.*?)(-?)([0-9]*)(\.svg)?$", name)
+                # Make sure the new title ends with "-%d" by default
+                name = match.group(1) + "-%d"
+                if match.group(3):
+                    # Filename already contained a number -> start counting from there
+                    offset = int(match.group(3))
+                    # -> only use "-" if it was there before
+                    name = match.group(1) + match.group(2) + "%d"
             # Find an unused file name
             for i in range(1, 1000):
-                possible_path = os.path.join(info.ASSETS_PATH, "%s.svg" % _("TitleFileName-%d") % i)
+                curname = name % (offset + i)
+                possible_path = os.path.join(info.ASSETS_PATH, "%s.svg" % curname)
                 if not os.path.exists(possible_path):
-                    self.txtFileName.setText(_("TitleFileName-%d") % i)
+                    self.txtFileName.setText(curname)
                     break
         self.txtFileName.setFixedHeight(28)
         self.settingsContainer.layout().addRow(label, self.txtFileName)
@@ -518,7 +534,7 @@ class TitleEditor(QDialog):
             else:
                 ar[opacity] = "opacity:" + str(alpha)
 
-            # rejoin the modifed parts
+            # rejoin the modified parts
             t = ";"
             self.bg_style_string = t.join(ar)
             # set the node in the xml doc

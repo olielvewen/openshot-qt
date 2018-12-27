@@ -6,19 +6,20 @@
   },
   "width": 1280,
   "height": 720,
-  "sample_rate": 44100,
+  "sample_rate": 48000,
   "channels": 2,
   "channel_layout": 3,
   "settings": {},
   "clips": [],
   "effects": [],
   "export_path": "",
+  "import_path": "",
   "files": [],
   "duration": 300,
-  "scale": 16,
+  "scale": 15,
   "tick_pixels": 100,
   "playhead_position": 0,
-  "profile": "HDV 720 24p",
+  "profile": "HD 720p 30 fps",
   "layers": [
     {
       "id": "L0",
@@ -58,6 +59,10 @@
   ],
   "markers": [  ],
   "progress": [  ],
+  "history": {
+    "undo": [],
+    "redo": []
+  },
   "version" : { "openshot-qt" : "0.0.0",
                 "libopenshot" : "0.0.0" }
 }

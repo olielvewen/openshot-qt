@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -197,7 +197,7 @@ class VideoWidget(QWidget):
             # Apply transform
             painter.setTransform(self.transform)
 
-            # Draw transform corners and cernter origin circle
+            # Draw transform corners and center origin circle
             # Corner size
             cs = 6.0
             os = 12.0
@@ -581,7 +581,7 @@ class VideoWidget(QWidget):
         # Mutex lock
         self.mutex = QMutex()
 
-        # Init Qt style properties (black background, ect...)
+        # Init Qt style properties (black background, etc...)
         p = QPalette()
         p.setColor(QPalette.Window, QColor("#191919"))
         super().setPalette(p)

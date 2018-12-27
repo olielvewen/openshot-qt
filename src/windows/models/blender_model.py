@@ -1,11 +1,11 @@
 """ 
  @file
- @brief This file contains the blender model, used by the 3d anmiated titles screen
+ @brief This file contains the blender model, used by the 3d animated titles screen
  @author Jonathan Thomas <jonathan@openshot.org>
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -75,20 +75,6 @@ class BlenderModel():
                 icon_path = os.path.join(icons_dir, icon_name)
                 category = xmldoc.getElementsByTagName("category")[0].childNodes[0].data
                 service = xmldoc.getElementsByTagName("service")[0].childNodes[0].data
-
-                if not win.actionEffectsShowAll.isChecked():
-                    if win.actionEffectsShowVideo.isChecked():
-                        if not category == "Video":
-                            continue  # to next file, didn't match filter
-                    elif win.actionEffectsShowAudio.isChecked():
-                        if not category == "Audio":
-                            continue  # to next file, didn't match filter
-
-                if win.effectsFilter.text() != "":
-                    if not win.effectsFilter.text().lower() in self.app._tr(
-                            title).lower() and not win.effectsFilter.text().lower() in self.app._tr(
-                            description).lower():
-                        continue
 
                 # Generate thumbnail for file (if needed)
                 thumb_path = os.path.join(info.CACHE_PATH, icon_name)

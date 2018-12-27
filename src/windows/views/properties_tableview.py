@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -34,8 +34,10 @@ from PyQt5.QtWidgets import QTableView, QAbstractItemView, QMenu, QSizePolicy, Q
 from classes.logger import log
 from classes.app import get_app
 from classes import info
-from classes.query import Clip, Effect, Transition
+from classes.query import Clip, Effect, Transition, File
 from windows.models.properties_model import PropertiesModel
+from windows.models.transition_model import TransitionsModel
+from windows.models.files_model import FilesModel
 
 import openshot
 
@@ -260,6 +262,14 @@ class PropertiesTableView(QTableView):
         # Clear original data
         self.original_data = None
 
+        # Get data model and selection
+        model = self.clip_properties_model.model
+        row = self.indexAt(event.pos()).row()
+        column = self.indexAt(event.pos()).column()
+        if model.item(row, 0):
+            self.selected_label = model.item(row, 0)
+            self.selected_item = model.item(row, 1)
+
     def doubleClickedCB(self, model_index):
         """Double click handler for the property table"""
         # Get data model and selection
@@ -325,15 +335,51 @@ class PropertiesTableView(QTableView):
             property = selected_label.data()
             property_name = property[1]["name"]
             self.property_type = property[1]["type"]
+            memo = json.loads(property[1]["memo"] or "{}")
             points = property[1]["points"]
             self.choices = property[1]["choices"]
             property_key = property[0]
             clip_id, item_type = selected_value.data()
-
-            log.info("Context menu shown for %s (%s) for clip %s on frame %s" % (
-                property_name, property_key, clip_id, frame_number))
+            log.info("Context menu shown for %s (%s) for clip %s on frame %s" % (property_name, property_key, clip_id, frame_number))
             log.info("Points: %s" % points)
             log.info("Property: %s" % str(property))
+
+            # Handle reader type values
+            if self.property_type == "reader" and not self.choices:
+
+                # Refresh models
+                self.transition_model.update_model()
+                self.files_model.update_model()
+
+                # Add all files
+                file_choices = []
+                for filesIndex in range(self.files_model.model.rowCount()):
+                    modelIndex = self.files_model.model.index(filesIndex, 0)
+                    fileItem = self.files_model.model.itemFromIndex(modelIndex)
+                    fileIcon = self.files_model.model.item(fileItem.row(), 0).icon()
+                    fileName = self.files_model.model.item(fileItem.row(), 1).text()
+                    fileParentPath = self.files_model.model.item(fileItem.row(), 4).text()
+
+                    # Append file choice
+                    file_choices.append({"name": fileName, "value": os.path.join(fileParentPath, fileName), "selected": False, "icon": fileIcon })
+
+                # Add root file choice
+                self.choices.append({"name": _("Files"), "value": file_choices, "selected": False})
+
+                # Add all transitions
+                trans_choices = []
+                for transIndex in range(self.transition_model.model.rowCount()):
+                    modelIndex = self.transition_model.model.index(transIndex, 0)
+                    transItem = self.transition_model.model.itemFromIndex(modelIndex)
+                    transIcon = self.transition_model.model.item(transItem.row(), 0).icon()
+                    transName = self.transition_model.model.item(transItem.row(), 1).text()
+                    transPath = self.transition_model.model.item(transItem.row(), 3).text()
+
+                    # Append transition choice
+                    trans_choices.append({"name": transName, "value": transPath, "selected": False, "icon": transIcon })
+
+                # Add root transitions choice
+                self.choices.append({"name": _("Transitions"), "value": trans_choices, "selected": False})
 
             # Define bezier presets
             bezier_presets = [
@@ -391,11 +437,15 @@ class PropertiesTableView(QTableView):
                 Constant_Action.setIcon(constant_icon)
                 Constant_Action.triggered.connect(self.Constant_Action_Triggered)
                 menu.addSeparator()
+                Insert_Action = menu.addAction(_("Insert Keyframe"))
+                Insert_Action.triggered.connect(self.Insert_Action_Triggered)
                 Remove_Action = menu.addAction(_("Remove Keyframe"))
                 Remove_Action.triggered.connect(self.Remove_Action_Triggered)
                 menu.popup(QCursor.pos())
             elif points == 1:
                 # Menu for a single point
+                Insert_Action = menu.addAction(_("Insert Keyframe"))
+                Insert_Action.triggered.connect(self.Insert_Action_Triggered)
                 Remove_Action = menu.addAction(_("Remove Keyframe"))
                 Remove_Action.triggered.connect(self.Remove_Action_Triggered)
                 menu.popup(QCursor.pos())
@@ -403,9 +453,36 @@ class PropertiesTableView(QTableView):
             if self.choices:
                 # Menu for choices
                 for choice in self.choices:
-                    Choice_Action = menu.addAction(_(choice["name"]))
-                    Choice_Action.setData(choice["value"])
-                    Choice_Action.triggered.connect(self.Choice_Action_Triggered)
+                    if type(choice["value"]) != list:
+                        # Add root choice items
+                        Choice_Action = menu.addAction(_(choice["name"]))
+                        Choice_Action.setData(choice["value"])
+                        Choice_Action.triggered.connect(self.Choice_Action_Triggered)
+                    else:
+                        # Add sub-choice items (for nested choice lists)
+                        # Divide into smaller QMenus (since large lists cover the entire screen)
+                        # For example: Transitions -> 1 -> sub items
+                        SubMenu = None
+                        SubMenuRoot = QMenu(_(choice["name"]), self)
+                        SubMenuSize = 24
+                        SubMenuNumber = 0
+                        for sub_choice in choice["value"]:
+                            if len(choice["value"]) > SubMenuSize:
+                                if not SubMenu or len(SubMenu.children()) == SubMenuSize or sub_choice == choice["value"][-1]:
+                                    SubMenuNumber += 1
+                                    if SubMenu:
+                                        SubMenuRoot.addMenu(SubMenu)
+                                    SubMenu = QMenu(str(SubMenuNumber), self)
+                                Choice_Action = SubMenu.addAction(_(sub_choice["name"]))
+                            else:
+                                Choice_Action = SubMenuRoot.addAction(_(sub_choice["name"]))
+                            Choice_Action.setData(sub_choice["value"])
+                            subChoiceIcon = sub_choice.get("icon")
+                            if subChoiceIcon:
+                                Choice_Action.setIcon(subChoiceIcon)
+                            Choice_Action.triggered.connect(self.Choice_Action_Triggered)
+                        menu.addMenu(SubMenuRoot)
+
                 # Show choice menu
                 menu.popup(QCursor.pos())
 
@@ -425,7 +502,7 @@ class PropertiesTableView(QTableView):
             self.clip_properties_model.value_updated(self.selected_item, interpolation=1)
         else:
             # Update colors interpolation mode
-            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=1, interpolation_details=preset)
+            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=1, interpolation_details=[])
 
     def Constant_Action_Triggered(self, event):
         log.info("Constant_Action_Triggered")
@@ -434,7 +511,13 @@ class PropertiesTableView(QTableView):
             self.clip_properties_model.value_updated(self.selected_item, interpolation=2)
         else:
             # Update colors interpolation mode
-            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=2, interpolation_details=preset)
+            self.clip_properties_model.color_update(self.selected_item, QColor("#000"), interpolation=2, interpolation_details=[])
+
+    def Insert_Action_Triggered(self, event):
+        log.info("Insert_Action_Triggered")
+        if self.selected_item:
+            current_value = QLocale().system().toDouble(self.selected_item.text())[0]
+            self.clip_properties_model.value_updated(self.selected_item, value=current_value)
 
     def Remove_Action_Triggered(self, event):
         log.info("Remove_Action_Triggered")
@@ -456,6 +539,8 @@ class PropertiesTableView(QTableView):
 
         # Get Model data
         self.clip_properties_model = PropertiesModel(self)
+        self.transition_model = TransitionsModel(self)
+        self.files_model = FilesModel(self)
 
         # Keep track of mouse press start position to determine when to start drag
         self.selected = []
@@ -483,6 +568,8 @@ class PropertiesTableView(QTableView):
 
         # Refresh view
         self.clip_properties_model.update_model()
+        self.transition_model.update_model()
+        self.files_model.update_model()
 
         # Resize columns
         self.resizeColumnToContents(0)
@@ -490,6 +577,7 @@ class PropertiesTableView(QTableView):
 
         # Connect filter signals
         get_app().window.txtPropertyFilter.textChanged.connect(self.filter_changed)
+        get_app().window.InsertKeyframe.connect(self.Insert_Action_Triggered)
         self.doubleClicked.connect(self.doubleClickedCB)
         self.loadProperties.connect(self.select_item)
 

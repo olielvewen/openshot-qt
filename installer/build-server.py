@@ -39,15 +39,17 @@ import stat
 import subprocess
 import sys
 import tinys3
+import time
 import traceback
-from PyQt5.QtCore import QLibraryInfo
 from github3 import login
 
+# Access info class (for version info)
+sys.path.append(os.path.join(PATH, 'src', 'classes'))
+import info
 
 freeze_command = None
 errors_detected = []
 make_command = "make"
-project_paths = []
 slack_token = None
 slack_object = None
 s3_access_key = None
@@ -58,32 +60,12 @@ windows_key_password = None
 github_user = None
 github_pass = None
 github_release = None
-commit_data = {}
+windows_32bit = False
+version_info = {}
 
 # Create temp log
-log_path = os.path.join(PATH, 's3-builds', 'build-server.log')
+log_path = os.path.join(PATH, 'build', 'build-server.log')
 log = open(log_path, 'w+')
-
-
-# Determine the paths and cmake args for each platform
-if platform.system() == "Linux":
-    freeze_command = "python3 /home/jonathan/apps/openshot-qt-git/freeze.py build"
-    project_paths = [("/home/jonathan/apps/libopenshot-audio-git", "../"),
-                     ("/home/jonathan/apps/libopenshot-git", "../"),
-                     ("/home/jonathan/apps/openshot-qt-git", "")]
-
-elif platform.system() == "Darwin":
-    freeze_command = '/Library/Frameworks/Python.Framework/Versions/3.5/bin/python3.5 /Users/jonathan/apps/openshot-qt-git/freeze.py bdist_mac --iconfile=installer/openshot.icns --custom-info-plist=installer/Info.plist --bundle-name="OpenShot Video Editor"'
-    project_paths = [("/Users/jonathan/apps/libopenshot-audio-git", '-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -D"CMAKE_BUILD_TYPE:STRING=Release" -D"CMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk" -D"CMAKE_OSX_DEPLOYMENT_TARGET=10.9" ../'),
-                     ("/Users/jonathan/apps/libopenshot-git", '-DCMAKE_CXX_COMPILER=/usr/local/opt/gcc48/bin/g++-4.8 -DCMAKE_C_COMPILER=/usr/local/opt/gcc48/bin/gcc-4.8 -DCMAKE_PREFIX_PATH=/usr/local/qt5/5.5/clang_64 -DPYTHON_INCLUDE_DIR=/Library/Frameworks/Python.framework/Versions/3.5/include/python3.5m -DPYTHON_LIBRARY=/Library/Frameworks/Python.framework/Versions/3.5/lib/libpython3.5.dylib -DPython_FRAMEWORKS=/Library/Frameworks/Python.framework/ -D"CMAKE_BUILD_TYPE:STRING=Debug" -D"CMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk" -D"CMAKE_OSX_DEPLOYMENT_TARGET=10.9" ../ -D"CMAKE_INSTALL_RPATH_USE_LINK_PATH=1" -D"ENABLE_RUBY=0"'),
-                     ("/Users/jonathan/apps/openshot-qt-git", "")]
-
-elif platform.system() == "Windows":
-    make_command = "mingw32-make"
-    freeze_command = "python3 C:\\Users\\Jonathan\\apps\\openshot-qt-git\\freeze.py build"
-    project_paths = [("C:\\Users\\Jonathan\\apps\\libopenshot-audio-git", '-G "MinGW Makefiles" ../ -D"CMAKE_BUILD_TYPE:STRING=Release"'),
-                     ("C:\\Users\\Jonathan\\apps\\libopenshot-git", '-G "MinGW Makefiles" ../ -D"CMAKE_BUILD_TYPE:STRING=Release"'),
-                     ("C:\\Users\\Jonathan\\apps\\openshot-qt-git", "")]
 
 
 def run_command(command, working_dir=None):
@@ -133,9 +115,20 @@ def slack_upload_log(log, title, comment=None):
 
     print("Slack Upload: %s" % log_path)
     if slack_object:
-        # Upload build log to slack (and append platform icon to comment [:linux:, :windows:, or :darwin:])
-        slack_object.files.upload(log_path, filetype="txt", filename="%s-build-server.txt" % platform.system(),
-                                  title=title, initial_comment=':%s: %s' % (platform.system().lower(), comment), channels="#build-server")
+        for attempt in range(3):
+            try:
+                # Upload build log to slack (and append platform icon to comment [:linux:, :windows:, or :darwin:])
+                slack_object.files.upload(log_path, filetype="txt", filename="%s-build-server.txt" % platform.system(),
+                                          title=title, initial_comment=':%s: %s' % (platform.system().lower(), comment), channels="#build-server")
+                # Successfully uploaded!
+                break
+            except Exception as ex:
+                # Quietly fail, and try again
+                if attempt < 2:
+                    output("Upload log to Slack failed... trying again")
+                else:
+                    # Throw loud exception
+                    raise Exception('Log upload to Slack failed: %s' % log_path, ex)
 
     # Re-open the log (for append)
     log = open(log_path, "a")
@@ -154,6 +147,12 @@ def upload(file_path, github_release):
     url = None
     if s3_connection:
         folder_path, file_name = os.path.split(file_path)
+
+        # Check if this asset is already uploaded
+        for asset in github_release.assets:
+            if asset.name == file_name:
+                raise Exception('Duplicate asset already uploaded: %s (%s)' % (file_path, asset.to_json()["browser_download_url"]))
+
         for attempt in range(3):
             try:
                 # Attempt the upload
@@ -169,9 +168,24 @@ def upload(file_path, github_release):
                     output("Upload failed... trying again")
                 else:
                     # Throw loud exception
-                    raise ex
+                    raise Exception('Upload failed. Verify that this file is not already uploaded: %s' % file_path, ex)
 
     return url
+
+def parse_version_info(version_path):
+    """Parse version info from gitlab artifacts"""
+    # Get name of version file
+    version_name = os.path.split(version_path)[1]
+    version_info[version_name] = {"CI_PROJECT_NAME": None, "CI_COMMIT_REF_NAME": None, "CI_COMMIT_SHA": None, "CI_JOB_ID": None}
+
+    if os.path.exists(version_path):
+        with open(version_path, "r") as f:
+            for line in f.readlines():
+                line_details = line.split(":")
+                version_info[version_name][line_details[0]] = line_details[1].strip()
+    else:
+        # Fail
+        raise Exception("Missing version artifacts: %s (%s)" % (version_path, str(version_info)))
 
 
 try:
@@ -194,372 +208,293 @@ try:
         gh = login(github_user, github_pass)
         repo = gh.repository("OpenShot", "openshot-qt")
 
+    if len(sys.argv) >=9:
+        windows_32bit = False
+        if sys.argv[8] == 'True':
+            windows_32bit = True
+
+    git_branch_name = "develop"
+    if len(sys.argv) >= 10:
+        git_branch_name = sys.argv[9]
+
     # Start log
-    output("%s Build Log for %s" % (platform.system(), datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    output("%s Build Log for %s (branch: %s)" % (platform.system(), datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), git_branch_name))
 
-    # Loop through projects
-    for project_path, cmake_args in project_paths:
-        # Change os directory
-        os.chdir(project_path)
+    # Detect artifact folder (if any)
+    artifact_path = os.path.join(PATH, "build", "install-x64")
+    if not os.path.exists(artifact_path):
+        artifact_path = os.path.join(PATH, "build", "install-x86")
+    if not os.path.exists(artifact_path):
+        # Default to user install path
+        artifact_path = ""
 
-        # Get number of commits
-        for line in run_command("git rev-list --count master"):
-            commit_data[project_path] = int(line)
-            output("# of commits found for %s: %s" % (project_path, commit_data[project_path]))
+    # Parse artifact version files (if found)
+    parse_version_info(os.path.join(artifact_path, "share", "libopenshot-audio"))
+    parse_version_info(os.path.join(artifact_path, "share", "libopenshot"))
+    parse_version_info(os.path.join(artifact_path, "share", "openshot-qt"))
+    output(str(version_info))
 
-        # Check for new version in git
-        needs_update = True
-        for line in run_command("git fetch -v --dry-run"):
-            output(line)
-            if "[up to date]".encode("UTF-8") in line:
-                needs_update = False
+    # Get GIT description of openshot-qt-git branch (i.e. v2.0.6-18-ga01a98c)
+    openshot_qt_git_desc = ""
+    needs_upload = True
+    for line in run_command("git describe --tags"):
+        git_description = line.decode("utf-8").strip()
+        openshot_qt_git_desc = "OpenShot-%s" % git_description
+
+        # Add num of commits from libopenshot and libopenshot-audio (for naming purposes)
+        # If not an official release
+        if git_branch_name == "develop":
+            # Make filename more descriptive for daily builds (add time epoch)
+            openshot_qt_git_desc = "OpenShot-v%s-%d" % (info.VERSION, int(time.time()))
+            openshot_qt_git_desc = "%s-%s-%s" % (openshot_qt_git_desc, version_info.get('libopenshot').get('CI_COMMIT_SHA')[:8], version_info.get('libopenshot-audio').get('CI_COMMIT_SHA')[:8])
+            # Get daily git_release object
+            github_release = get_release(repo, "daily")
+        elif git_branch_name == "release":
+            # Get daily git_release object
+            openshot_qt_git_desc = "OpenShot-v%s-release-candidate-%d" % (info.VERSION, int(time.time()))
+            github_release = get_release(repo, "daily")
+        elif git_branch_name == "master":
+            # Get official version release (i.e. v2.1.0, v2.x.x)
+            github_release = get_release(repo, git_description)
+
+            # If no release is found, create a new one
+            if not github_release:
+                # Create a new release if one if missing
+                github_release = repo.create_release(git_description, target_commitish="master", prerelease=True)
+        else:
+            # Make filename more descriptive for daily builds
+            openshot_qt_git_desc = "OpenShot-v%s-%d" % (info.VERSION, int(time.time()))
+            openshot_qt_git_desc = "%s-%s-%s" % (openshot_qt_git_desc, version_info.get('libopenshot').get('CI_COMMIT_SHA')[:8], version_info.get('libopenshot-audio').get('CI_COMMIT_SHA')[:8])
+            # Get daily git_release object
+            github_release = get_release(repo, "daily")
+            needs_upload = False
+
+    # Output git description
+    output("git description of openshot-qt-git: %s" % openshot_qt_git_desc)
+
+    # Detect version number from git description
+    version = re.search('v(.+?)($|-)', openshot_qt_git_desc).groups()[0]
+
+    # Determine the name and path of the final installer
+    app_name = openshot_qt_git_desc
+    app_upload_bucket = ""
+    if platform.system() == "Linux":
+        app_name += "-x86_64.AppImage"
+        app_upload_bucket = "releases.openshot.org/linux"
+    elif platform.system() == "Darwin":
+        app_name += "-x86_64.dmg"
+        app_upload_bucket = "releases.openshot.org/mac"
+    elif platform.system() == "Windows" and not windows_32bit:
+        app_name += "-x86_64.exe"
+        app_upload_bucket = "releases.openshot.org/windows"
+    elif platform.system() == "Windows" and windows_32bit:
+        app_name += "-x86.exe"
+        app_upload_bucket = "releases.openshot.org/windows"
+    builds_path = os.path.join(PATH, "build")
+    app_build_path = os.path.join(builds_path, app_name)
+    app_upload_path = os.path.join(builds_path, app_name)
+
+    # Successfully frozen - Time to create installers
+    if platform.system() == "Linux":
+        # Locate exe_dir
+        for exe_path in os.listdir(os.path.join(PATH, "build")):
+            if exe_path.startswith('exe.linux'):
+                exe_dir = exe_path
                 break
 
-        if needs_update:
-            # Get latest from git
-            for line in run_command("git pull origin master"):
-                output(line)
+        # Create AppDir folder
+        app_dir_path = os.path.join(PATH, "build", "OpenShot.AppDir")
+        os.mkdir(app_dir_path)
+        os.mkdir(os.path.join(app_dir_path, "usr"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "share"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "share", "pixmaps"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "share", "mime"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "share", "mime", "packages"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "lib"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "lib", "mime"))
+        os.mkdir(os.path.join(app_dir_path, "usr", "lib", "mime", "packages"))
 
-            # Get latest tags from git
-            for line in run_command("git fetch --tags"):
-                output(line)
+        # Create AppRun file
+        app_run_path = os.path.join(app_dir_path, "AppRun")
+        shutil.copyfile("/home/ubuntu/apps/AppImageKit/AppRun", app_run_path)
 
-            # Sync these changes to bzr (if build-server running on linux)
-            if platform.system() == "Linux":
-                for line in run_command("git bzr push"):
-                    output(line)
+        # Create .desktop file
+        with open(os.path.join(app_dir_path, "openshot-qt.desktop"), "w") as f:
+            f.write('[Desktop Entry]\nName=OpenShot Video Editor\nGenericName=Video Editor\nX-GNOME-FullName=OpenShot Video Editor\nComment=Create and edit amazing videos and movies\nExec=openshot-qt.wrapper %F\nTerminal=false\nIcon=openshot-qt\nType=Application')
 
-            # Remove build folder & re-create it
-            build_folder = os.path.join(project_path, "build")
-            if os.path.exists(build_folder):
-                shutil.rmtree(build_folder)
-            os.makedirs(build_folder)
+        # Copy some installation-related files
+        shutil.copyfile(os.path.join(PATH, "xdg", "openshot-qt.svg"), os.path.join(app_dir_path, "openshot-qt.svg"))
+        shutil.copyfile(os.path.join(PATH, "xdg", "openshot-qt.svg"), os.path.join(app_dir_path, "usr", "share", "pixmaps", "openshot-qt.svg"))
+        shutil.copyfile(os.path.join(PATH, "xdg", "openshot-qt.xml"), os.path.join(app_dir_path, "usr", "share", "mime", "packages", "openshot-qt.xml"))
+        shutil.copyfile(os.path.join(PATH, "xdg", "openshot-qt"), os.path.join(app_dir_path, "usr", "lib", "mime", "packages", "openshot-qt"))
 
-            # Change to build folder
-            os.chdir(build_folder)
+        # Copy the entire frozen app
+        shutil.copytree(os.path.join(PATH, "build", exe_dir), os.path.join(app_dir_path, "usr", "bin"))
 
-            # Skip to next project if no cmake args are found (only some projects need to be compiled)
-            if not cmake_args:
-                output("Skipping compilation for %s" % project_path)
-                continue
+        # Copy desktop integration wrapper (prompts users to install shortcut)
+        launcher_path = os.path.join(app_dir_path, "usr", "bin", "openshot-qt")
+        os.rename(os.path.join(app_dir_path, "usr", "bin", "launch-linux.sh"), launcher_path)
+        desktop_wrapper = os.path.join(app_dir_path, "usr", "bin", "openshot-qt.wrapper")
+        shutil.copyfile("/home/ubuntu/apps/AppImageKit/desktopintegration", desktop_wrapper)
 
-            # Run CMAKE (configure all project files, and get ready to compile)
-            for line in run_command("cmake %s" % cmake_args):
-                output(line)
-                if "CMake Error".encode("UTF-8") in line or "Configuring incomplete".encode("UTF-8") in line:
-                    error("Cmake Error: %s" % line)
+        # Change permission of AppRun (and desktop.wrapper) file (add execute permission)
+        st = os.stat(app_run_path)
+        os.chmod(app_run_path, st.st_mode | stat.S_IEXEC)
+        os.chmod(desktop_wrapper, st.st_mode | stat.S_IEXEC)
+        os.chmod(launcher_path, st.st_mode | stat.S_IEXEC)
 
-            # Run MAKE (compile binaries, python bindings, executables, etc...)
-            for line in run_command(make_command):
-                output(line)
-                if ": error:".encode("UTF-8") in line or "No targets specified".encode("UTF-8") in line:
-                    error("Make Error: %s" % line)
+        # Create AppImage (OpenShot-%s-x86_64.AppImage)
+        app_image_success = False
+        for line in run_command('/home/ubuntu/apps/AppImageKit/AppImageAssistant "%s" "%s"' % (app_dir_path, app_build_path)):
+            output(line)
+        app_image_success = os.path.exists(app_build_path)
 
-            # Run MAKE INSTALL (copy binaries to install directory)
-            for line in run_command("%s install" % make_command):
-                output(line)
-                if "[install] Error".encode("UTF-8") in line or "CMake Error".encode("UTF-8") in line:
-                    error("Make Install Error: %s" % line)
+        # Was the AppImage creation successful
+        if not app_image_success or errors_detected:
+            # AppImage failed
+            error("AppImageKit Error: AppImageAssistant did not output the AppImage file")
+            needs_upload = False
 
-
-    # Now that everything is updated, let's create the installers
-    if not errors_detected:
-        # Change to openshot-qt dir
-        project_path = project_paths[2][0]
-        os.chdir(project_path)
-
-        # Get GIT description of openshot-qt-git branch (i.e. v2.0.6-18-ga01a98c)
-        openshot_qt_git_desc = ""
-        for line in run_command("git describe --tags"):
-            git_description = line.decode("utf-8").strip()
-            openshot_qt_git_desc = "OpenShot-%s" % git_description
-
-            # Add num of commits from libopenshot and libopenshot-audio (for naming purposes)
-            # If not an official release
-            if "-" in git_description:
-                # Make filename more descriptive for daily builds
-                openshot_qt_git_desc = "%s-%s-%s" % (openshot_qt_git_desc, commit_data[project_paths[0][0]], commit_data[project_paths[1][0]])
-                output("git description of openshot-qt-git: %s" % openshot_qt_git_desc)
-
-                # Get daily git_release object
-                github_release = get_release(repo, "daily")
-            else:
-                # Get official version release (i.e. v2.1.0, v2.x.x)
-                github_release = get_release(repo, git_description)
-
-                # If no release is found, create a new one
-                if not github_release:
-                    # Create a new release if one if missing
-                    github_release = repo.create_release(git_description, target_commitish="master", prerelease=True)
-
-        # Detect version number from git description
-        version = re.search('v(.+?)($|-)', openshot_qt_git_desc).groups()[0]
-
-        # Check for left over openshot-qt dupe folder
-        if os.path.exists(os.path.join(project_path, "openshot_qt")):
-            shutil.rmtree(os.path.join(project_path, "openshot_qt"))
-        if os.path.exists(os.path.join(project_path, "build")):
-            shutil.rmtree(os.path.join(project_path, "build"))
-        if os.path.exists(os.path.join(project_path, "dist")):
-            shutil.rmtree(os.path.join(project_path, "dist"))
-
-        # Copy QT translations to local folder (to be packaged)
-        qt_local_path = os.path.join(project_path, "src", "locale", "QT")
-        qt_system_path = QLibraryInfo.location(QLibraryInfo.TranslationsPath)
-        if os.path.exists(qt_system_path):
-            # Create local QT translation folder (if needed)
-            if not os.path.exists(qt_local_path):
-                os.mkdir(qt_local_path)
-            # Loop through QT translation files and copy them
-            for file in os.listdir(qt_system_path):
-                # Copy QT locale files
-                if file.startswith("qt_") and file.endswith(".qm"):
-                    shutil.copyfile(os.path.join(qt_system_path, file), os.path.join(qt_local_path, file))
-
-        # Create uploads path (if not found)
-        upload_path = os.path.join(project_path, "s3-uploads")
-        if not os.path.exists(upload_path):
-            os.mkdir(upload_path)
-        builds_path = os.path.join(project_path, "s3-builds")
-        if not os.path.exists(builds_path):
-            os.mkdir(builds_path)
-
-        # Determine the name and path of the final installer
-        app_name = openshot_qt_git_desc
-        app_upload_bucket = ""
-        if platform.system() == "Linux":
-            app_name += "-x86_64.AppImage"
-            app_upload_bucket = "releases.openshot.org/linux"
-        elif platform.system() == "Darwin":
-            app_name += "-x86_64.dmg"
-            app_upload_bucket = "releases.openshot.org/mac"
-        elif platform.system() == "Windows":
-            app_name += "-x86_64.exe"
-            app_upload_bucket = "releases.openshot.org/windows"
-        app_build_path = os.path.join(builds_path, app_name)
-        app_upload_path = os.path.join(upload_path, app_name)
-
-        # Does this version need to be built?
-        needs_build = False
-        if not os.path.exists(app_build_path) and not os.path.exists(app_upload_path):
-            needs_build = True
-
-        # Does this version need to be uploaded?
-        needs_upload = False
-        if not os.path.exists(app_upload_path):
-            needs_upload = True
+            # Delete build (since something failed)
+            os.remove(app_build_path)
 
 
-        if needs_build:
-            # Freeze it (if needed)
-            for line in run_command(freeze_command):
-                output(line)
-                if "logger:ERROR".encode("UTF-8") in line and not "importlib/__init__.pyc".encode("UTF-8") in line and not "zinfo".encode("UTF-8") in line:
-                    error("Freeze Error: %s" % line)
+    if platform.system() == "Darwin":
 
-            # Successfully frozen - Time to create installers
-            if platform.system() == "Linux":
+        # Create DMG (OpenShot-%s-x86_64.DMG)
+        app_image_success = False
 
-                # Find exe folder
-                exe_dirs = os.listdir(os.path.join(project_path, "build"))
-                if len(exe_dirs) == 1:
-                    exe_dir = exe_dirs[0]
+        # Build app.bundle and create DMG
+        for line in run_command("bash installer/build-mac-dmg.sh"):
+            output(line)
+            if "error".encode("UTF-8") in line or "rejected".encode("UTF-8") in line:
+                error("Build-Mac-DMG Error: %s" % line)
+            if "Your image is ready".encode("UTF-8") in line:
+                app_image_success = True
 
-                    # Create AppDir folder
-                    app_dir_path = os.path.join(project_path, "build", "OpenShot.AppDir")
-                    os.mkdir(app_dir_path)
-                    os.mkdir(os.path.join(app_dir_path, "usr"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "share"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "share", "pixmaps"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "share", "mime"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "share", "mime", "packages"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "lib"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "lib", "mime"))
-                    os.mkdir(os.path.join(app_dir_path, "usr", "lib", "mime", "packages"))
+        # Rename DMG (to be consistent with other OS installers)
+        for dmg_path in os.listdir(os.path.join(PATH, "build")):
+            if os.path.isfile(os.path.join(PATH, "build", dmg_path)) and dmg_path.endswith(".dmg"):
+                os.rename(os.path.join(PATH, "build", dmg_path), app_build_path)
 
-                    # Create AppRun file
-                    app_run_path = os.path.join(app_dir_path, "AppRun")
-                    shutil.copyfile("/home/jonathan/apps/AppImageKit/AppRun", app_run_path)
+        # Was the DMG creation successful
+        if not app_image_success or errors_detected:
+            # DMG failed
+            error("Build-Mac-DMG Error: Did not output 'Your image is ready'")
+            needs_upload = False
 
-                    # Create .desktop file
-                    with open(os.path.join(app_dir_path, "openshot-qt.desktop"), "w") as f:
-                        f.write('[Desktop Entry]\nName=OpenShot Video Editor\nGenericName=Video Editor\nX-GNOME-FullName=OpenShot Video Editor\nComment=Create and edit amazing videos and movies\nExec=openshot-qt.wrapper %F\nTerminal=false\nIcon=openshot-qt\nType=Application')
-
-                    # Copy some installation-related files
-                    shutil.copyfile(os.path.join(project_path, "xdg", "openshot-qt.svg"), os.path.join(app_dir_path, "openshot-qt.svg"))
-                    shutil.copyfile(os.path.join(project_path, "xdg", "openshot-qt.svg"), os.path.join(app_dir_path, "usr", "share", "pixmaps", "openshot-qt.svg"))
-                    shutil.copyfile(os.path.join(project_path, "xdg", "openshot-qt.xml"), os.path.join(app_dir_path, "usr", "share", "mime", "packages", "openshot-qt.xml"))
-                    shutil.copyfile(os.path.join(project_path, "xdg", "openshot-qt"), os.path.join(app_dir_path, "usr", "lib", "mime", "packages", "openshot-qt"))
-
-                    # Copy the entire frozen app
-                    shutil.copytree(os.path.join(project_path, "build", exe_dir), os.path.join(app_dir_path, "usr", "bin"))
-
-                    # Copy desktop integration wrapper (prompts users to install shortcut)
-                    launcher_path = os.path.join(app_dir_path, "usr", "bin", "openshot-qt")
-                    os.rename(os.path.join(app_dir_path, "usr", "bin", "launch-linux.sh"), launcher_path)
-                    desktop_wrapper = os.path.join(app_dir_path, "usr", "bin", "openshot-qt.wrapper")
-                    shutil.copyfile("/home/jonathan/apps/AppImageKit/desktopintegration", desktop_wrapper)
-
-                    # Change permission of AppRun (and desktop.wrapper) file (add execute permission)
-                    st = os.stat(app_run_path)
-                    os.chmod(app_run_path, st.st_mode | stat.S_IEXEC)
-                    os.chmod(desktop_wrapper, st.st_mode | stat.S_IEXEC)
-                    os.chmod(launcher_path, st.st_mode | stat.S_IEXEC)
-
-                    # Create AppImage (OpenShot-%s-x86_64.AppImage)
-                    app_image_success = False
-                    for line in run_command('/home/jonathan/apps/AppImageKit/AppImageAssistant "%s" "%s"' % (app_dir_path, app_build_path)):
-                        output(line)
-                        if "error".encode("UTF-8") in line:
-                            error("AppImageKit Error: %s" % line)
-                        if "completed sucessfully".encode("UTF-8") in line:
-                            app_image_success = True
-
-                    # Was the AppImage creation successful
-                    if not app_image_success or errors_detected:
-                        # AppImage failed
-                        error("AppImageKit Error: AppImageAssistant did not output 'completed successfully'")
-                        needs_upload = False
-
-                        # Delete build (since something failed)
-                        os.remove(app_build_path)
+            # Delete build (since key signing might have failed)
+            os.remove(app_build_path)
 
 
-            if platform.system() == "Darwin":
+    if platform.system() == "Windows":
 
-                # Create DMG (OpenShot-%s-x86_64.DMG)
-                app_image_success = False
+        # Move python folder structure, since Cx_Freeze doesn't put it in the correct place
+        exe_dir = os.path.join(PATH, 'build', 'exe.mingw-3.6')
+        python_dir = os.path.join(exe_dir, 'lib', 'python3.6')
+        if not os.path.exists(python_dir):
+            os.mkdir(python_dir)
 
-                # Build app.bundle and create DMG
-                for line in run_command("bash installer/build-mac-dmg.sh"):
-                    output(line)
-                    if "error".encode("UTF-8") in line or "rejected".encode("UTF-8") in line:
-                        error("Build-Mac-DMG Error: %s" % line)
-                    if "Your image is ready".encode("UTF-8") in line:
-                        app_image_success = True
+            # Copy all non-zip files from /lib/ into /python3.X/
+            for lib_file in os.listdir(os.path.join(exe_dir, 'lib')):
+                if not ".zip" in lib_file and not lib_file == "python3.6":
+                    lib_src_path = os.path.join(os.path.join(exe_dir, 'lib'), lib_file)
+                    lib_dst_path = os.path.join(os.path.join(python_dir), lib_file)
+                    shutil.move(lib_src_path, lib_dst_path)
 
-                # Rename DMG (to be consistent with other OS installers)
-                for dmg_path in os.listdir(os.path.join(project_path, "build")):
-                    if os.path.isfile(os.path.join(project_path, "build", dmg_path)) and dmg_path.endswith(".dmg"):
-                        os.rename(os.path.join(project_path, "build", dmg_path), app_build_path)
+        # Delete debug Qt libraries (since they are not needed, and cx_Freeze grabs them)
+        for sub_folder in ['', 'platforms', 'imageformats']:
+            parent_path = exe_dir
+            if sub_folder:
+                parent_path = os.path.join(parent_path, sub_folder)
+            for debug_qt_lib in os.listdir(parent_path):
+                if debug_qt_lib.endswith("d.dll"):
+                    # Delete the debug dll
+                    os.remove(os.path.join(parent_path, debug_qt_lib))
 
-                # Was the DMG creation successful
-                if not app_image_success or errors_detected:
-                    # DMG failed
-                    error("Build-Mac-DMG Error: Did not output 'Your image is ready'")
-                    needs_upload = False
+        only_64_bit = "x64"
+        if windows_32bit:
+            only_64_bit = ""
 
-                    # Delete build (since key signing might have failed)
-                    os.remove(app_build_path)
+        # Copy uninstall files into build folder
+        for file in os.listdir(os.path.join("c:/", "InnoSetup")):
+            shutil.copyfile(os.path.join("c:/", "InnoSetup", file), os.path.join(PATH, "build", file))
 
+        # Create Installer (OpenShot-%s-x86_64.exe)
+        inno_success = True
+        inno_command = '"C:\Program Files (x86)\Inno Setup 5\iscc.exe" /Q /DVERSION=%s /DONLY_64_BIT=%s "%s"' % (version, only_64_bit, os.path.join(PATH, 'installer', 'windows-installer.iss'))
+        inno_output = ""
+        # Compile Inno installer
+        for line in run_command(inno_command):
+            output(line)
+            if line:
+                inno_success = False
+                inno_output = line
 
-            if platform.system() == "Windows":
+        # Was the Inno Installer successful
+        inno_output_exe = os.path.join(PATH, "installer", "Output", "OpenShot.exe")
+        if not inno_success or not os.path.exists(inno_output_exe):
+            # Installer failed
+            error("Inno Compiler Error: Had output when none was expected (%s)" % inno_output)
+            needs_upload = False
+        else:
+            # Rename exe to correct name / path
+            os.rename(inno_output_exe, app_build_path)
+            # Clean-up empty folder created by Inno compiler
+            os.rmdir(os.path.join(PATH, 'installer', 'Output'))
 
-                # Move python3.5 folder structure, since Cx_Freeze doesn't put it in the correct place
-                exe_dir = os.path.join(PATH, 'build', 'exe.mingw-3.5')
-                python35_dir = os.path.join(exe_dir, 'lib', 'python3.5')
-                if not os.path.exists(python35_dir):
-                    os.mkdir(python35_dir)
+        # Sign the installer
+        key_sign_success = True
+        key_sign_command = '"C:\\Program Files (x86)\\kSign\\kSignCMD.exe" /f "%s" /p "%s" /d "OpenShot Video Editor" /du "http://www.openshot.org" "%s"' % (windows_key, windows_key_password, app_build_path)
+        key_sign_output = ""
+        # Sign MSI
+        for line in run_command(key_sign_command):
+            output(line)
+            if line:
+                key_sign_success = False
+                key_sign_output = line
 
-                    # Copy all non-zip files from /lib/ into /python3.5/
-                    for lib_file in os.listdir(os.path.join(exe_dir, 'lib')):
-                        if not ".zip" in lib_file:
-                            lib_src_path = os.path.join(os.path.join(exe_dir, 'lib'), lib_file)
-                            lib_dst_path = os.path.join(os.path.join(python35_dir), lib_file)
-                            if not os.path.isdir(lib_src_path):
-                                shutil.move(lib_src_path, lib_dst_path)
+        # Was the MSI creation successful
+        if not key_sign_success:
+            # MSI failed
+            error("Key Sign Error: Had output when none was expected (%s)" % key_sign_output)
+            needs_upload = False
 
-                # Delete debug Qt libraries (since they are not needed, and cx_Freeze grabs them)
-                for debug_qt_lib in os.listdir(exe_dir):
-                    if debug_qt_lib.endswith("d.dll"):
-                        # Delete the debug dll
-                        os.remove(os.path.join(exe_dir, debug_qt_lib))
-
-                # Create Installer (OpenShot-%s-x86_64.exe)
-                inno_success = True
-                inno_command = '"C:\Program Files (x86)\Inno Setup 5\iscc.exe" /Q /DVERSION=%s "%s"' % (version, os.path.join(PATH, 'installer', 'windows-installer.iss'))
-                inno_output = ""
-                # Compile Inno installer
-                for line in run_command(inno_command):
-                    output(line)
-                    if line:
-                        inno_success = False
-                        inno_output = line
-
-                # Was the Inno Installer successful
-                inno_output_exe = os.path.join(project_path, "installer", "Output", "OpenShot-x86_64.exe")
-                if not inno_success or not os.path.exists(inno_output_exe):
-                    # Installer failed
-                    error("Inno Compiler Error: Had output when none was expected (%s)" % inno_output)
-                    needs_upload = False
-                else:
-                    # Rename exe to correct name / path
-                    os.rename(inno_output_exe, app_build_path)
-                    # Clean-up empty folder created by Inno compiler
-                    os.rmdir(os.path.join(PATH, 'installer', 'Output'))
-
-                # Sign the installer
-                key_sign_success = True
-                key_sign_command = '"C:\\Program Files (x86)\\kSign\\kSignCMD.exe" /f "%s" /p "%s" /d "OpenShot Video Editor" /du "http://www.openshot.org" "%s"' % (windows_key, windows_key_password, app_build_path)
-                key_sign_output = ""
-                # Sign MSI
-                for line in run_command(key_sign_command):
-                    output(line)
-                    if line:
-                        key_sign_success = False
-                        key_sign_output = line
-
-                # Was the MSI creation successful
-                if not key_sign_success:
-                    # MSI failed
-                    error("Key Sign Error: Had output when none was expected (%s)" % key_sign_output)
-                    needs_upload = False
-
-                    # Delete build (since key signing might have failed)
-                    os.remove(app_build_path)
+            # Delete build (since key signing might have failed)
+            os.remove(app_build_path)
 
 
-        if needs_upload:
-            # Check if app exists
-            if os.path.exists(app_build_path):
-                # Upload file to GitHub
-                output("GitHub: Uploading %s to GitHub Release: %s" % (app_build_path, github_release.tag_name))
-                download_url = upload(app_build_path, github_release)
+    # Upload Installer to GitHub (if build path exists)
+    if needs_upload and os.path.exists(app_build_path):
+        # Upload file to GitHub
+        output("GitHub: Uploading %s to GitHub Release: %s" % (app_build_path, github_release.tag_name))
+        download_url = upload(app_build_path, github_release)
 
-                # Create torrent and upload
-                torrent_path = "%s.torrent" % app_build_path
-                torrent_command = 'mktorrent -a "udp://tracker.openbittorrent.com:80/announce, udp://tracker.publicbt.com:80/announce, udp://tracker.opentrackr.org:1337" -c "OpenShot Video Editor %s" -w "%s" -o "%s" "%s"' % (version, download_url, "%s.torrent" % app_name, app_name)
-                torrent_output = ""
-                # Create torrent
-                for line in run_command(torrent_command, builds_path):
-                    output(line)
-                    if line:
-                        torrent_output = line.decode('UTF-8').strip()
+        # Create torrent and upload
+        torrent_path = "%s.torrent" % app_build_path
+        torrent_command = 'mktorrent -a "udp://tracker.openbittorrent.com:80/announce, udp://tracker.publicbt.com:80/announce, udp://tracker.opentrackr.org:1337" -c "OpenShot Video Editor %s" -w "%s" -o "%s" "%s"' % (version, download_url, "%s.torrent" % app_name, app_name)
+        torrent_output = ""
 
-                if not torrent_output.endswith("Writing metainfo file... done."):
-                    # Torrent failed
-                    error("Torrent Error: Unexpected output (%s)" % torrent_output)
+        # Remove existing torrents (if any found)
+        if os.path.exists(torrent_path):
+            os.remove(torrent_path)
 
-                else:
-                    # Torrent succeeded! Upload the torrent to github
-                    url = upload(torrent_path, github_release)
+        # Create torrent
+        for line in run_command(torrent_command, builds_path):
+            output(line)
+            if line:
+                torrent_output = line.decode('UTF-8').strip()
 
-                    # Notify Slack
-                    slack_upload_log(log, "%s: Build logs for %s" % (platform.system(), app_name), "Successful build: %s" % download_url)
+        if not torrent_output.endswith("Writing metainfo file... done."):
+            # Torrent failed
+            error("Torrent Error: Unexpected output (%s)" % torrent_output)
 
-                    # Move app to uploads folder, and remove from build folder (so it will be skipped next time)
-                    shutil.copyfile(app_build_path, app_upload_path)
-                    os.remove(app_build_path)
-                    shutil.copyfile(torrent_path, "%s.torrent" % app_upload_path)
-                    os.remove(torrent_path)
+        else:
+            # Torrent succeeded! Upload the torrent to github
+            url = upload(torrent_path, github_release)
 
-            else:
-                # App doesn't exist (something went wrong)
-                error("App Missing Error: %s does not exist" % app_build_path)
-
-        # Remove temporary files
-        if os.path.exists(qt_local_path):
-            shutil.rmtree(qt_local_path)
+            # Notify Slack
+            slack_upload_log(log, "%s: Build logs for %s" % (platform.system(), app_name), "Successful *%s* build: %s" % (git_branch_name, download_url))
 
 except Exception as ex:
     tb = traceback.format_exc()
@@ -568,21 +503,6 @@ except Exception as ex:
 
 # Report any errors detected
 if errors_detected:
-    slack_upload_log(log, "%s: Error log" % platform.system(), ":skull_and_crossbones: %s" % truncate(errors_detected[0], 150))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    slack_upload_log(log, "%s: Error log for *%s* build" % (platform.system(), git_branch_name), ":skull_and_crossbones: %s" % truncate(errors_detected[0], 150))
+    exit(1)
 

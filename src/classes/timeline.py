@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -76,7 +76,7 @@ class TimelineSync(UpdateInterface):
         """ This method is invoked by the UpdateManager each time a change happens (i.e UpdateInterface) """
 
         # Ignore changes that don't affect libopenshot
-        if len(action.key) >= 1 and action.key[0].lower() in ["files", "markers", "layers", "export_path", "scale"]:
+        if len(action.key) >= 1 and action.key[0].lower() in ["files", "history", "markers", "layers", "export_path", "import_path", "scale"]:
             return
 
         elif len(action.key) >= 1 and action.key[0].lower() in ["profile"]:
@@ -92,6 +92,9 @@ class TimelineSync(UpdateInterface):
                 self.timeline.SetJson(action.json(only_value=True))
                 self.timeline.Open()  # Re-Open the Timeline reader
 
+                # The timeline's profile changed, so update all clips
+                self.timeline.ApplyMapperToClips()
+
                 # Refresh current frame (since the entire timeline was updated)
                 self.window.refreshFrameSignal.emit()
 
@@ -100,7 +103,7 @@ class TimelineSync(UpdateInterface):
                 self.timeline.ApplyJsonDiff(action.json(is_array=True))
 
         except Exception as e:
-            log.info("Error applying JSON to timeline object in libopenshot: %s" % e)
+            log.info("Error applying JSON to timeline object in libopenshot: %s. %s" % (e, action.json(is_array=True)))
 
     def MaxSizeChangedCB(self, new_size):
         """Callback for max sized change (i.e. max size of video widget)"""

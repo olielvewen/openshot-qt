@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -51,6 +51,7 @@ class CreditsModel():
     kickstarter_icon = QIcon(os.path.join(info.IMAGES_PATH, "kickstarter-icon.png"))
     bitcoin_icon = QIcon(os.path.join(info.IMAGES_PATH, "bitcoin-icon.png"))
     patreon_icon = QIcon(os.path.join(info.IMAGES_PATH, "patreon-icon.png"))
+    developer_icon = QIcon(os.path.join(info.IMAGES_PATH, "python-icon.png"))
 
     def update_model(self, filter=None, clear=True):
         log.info("updating credits model.")
@@ -109,6 +110,9 @@ class CreditsModel():
             elif "n" in icons:
                 col.setIcon(QIcon(self.patreon_icon))
                 col.setToolTip(_("Patreon Supporter!"))
+            elif "d" in icons:
+                col.setIcon(QIcon(self.developer_icon))
+                col.setToolTip(_("Developer!"))
             col.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             row.append(col)
 

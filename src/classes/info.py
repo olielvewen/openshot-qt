@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -27,15 +27,17 @@
 
 import os
 
-VERSION = "2.3.4-dev1"
-MINIMUM_LIBOPENSHOT_VERSION = "0.1.7"
-DATE = "20170509000000"
+from PyQt5.QtCore import QDir
+
+VERSION = "2.4.3"
+MINIMUM_LIBOPENSHOT_VERSION = "0.2.2"
+DATE = "20180922000000"
 NAME = "openshot-qt"
 PRODUCT_NAME = "OpenShot Video Editor"
 GPL_VERSION = "3"
 DESCRIPTION = "Create and edit stunning videos, movies, and animations"
 COMPANY_NAME = "OpenShot Studios, LLC"
-COPYRIGHT = "Copyright (c) 2008-2016 %s" % COMPANY_NAME
+COPYRIGHT = "Copyright (c) 2008-2018 %s" % COMPANY_NAME
 CWD = os.getcwd()
 PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # Primary openshot folder
 HOME_PATH = os.path.join(os.path.expanduser("~"))
@@ -60,26 +62,28 @@ for folder in [USER_PATH, THUMBNAIL_PATH, CACHE_PATH, BLENDER_PATH, ASSETS_PATH,
     if not os.path.exists(folder.encode("UTF-8")):
         os.makedirs(folder, exist_ok=True)
 
-# names of all contributers, using "u" for unicode encoding
-AF = {"name": u"Andy Finch", "email": "andy@openshot.org", "website":"http://openshot.org/developers/andy"}
-NF = {"name": u"Noah Figg", "email": "eggmunkee@hotmail.com"}
+# names of all contributors, using "u" for unicode encoding
 JT = {"name": u"Jonathan Thomas", "email": "jonathan@openshot.org", "website":"http://openshot.org/developers/jonathan"}
-OG = {"name": u"Olivier Girard", "email": "olivier@openshot.org", "website":"http://openshot.org/developers/olivier"}
-CP = {"name": u"Cody Parker", "email": "cody@yourcodepro.com", "website":"http://openshot.org/developers/cody_parker"}
 
 # Languages
+CMDLINE_LANGUAGE = None
+CURRENT_LANGUAGE = 'en_US'
 SUPPORTED_LANGUAGES = ['en_US']
-for lang in os.listdir(os.path.join(PATH, 'locale')):
-    if lang not in ["OpenShot"] and not os.path.isfile(os.path.join(PATH, 'locale', lang)):
-        SUPPORTED_LANGUAGES.append(lang)
 
-# credits
-CREDITS = {
-    "code": [JT, NF, AF, CP, OG],
-    "artwork": [JT],
-    "documentation": [JT],
-    "translation": [OG],
-}
+try:
+    from language import openshot_lang
+    language_path=":/locale/"
+except ImportError:
+    language_path=os.path.join(PATH, 'language')
+    print("Compiled translation resources missing!")
+    print("Loading translations from: {}".format(language_path))
+
+# Compile language list from :/locale resource
+langdir = QDir(language_path)
+langs = langdir.entryList(['OpenShot.*.qm'], QDir.NoDotAndDotDot|QDir.Files,
+                          sort=QDir.Name)
+for trpath in langs:
+    SUPPORTED_LANGUAGES.append(trpath.split('.')[1])
 
 SETUP = {
     "name": NAME,
@@ -127,3 +131,10 @@ SETUP = {
         ]
     }
 }
+
+def website_language():
+    """Get the current website language code for URLs"""
+    website_lang = "www"
+    if CURRENT_LANGUAGE != "en_US":
+        website_lang = CURRENT_LANGUAGE
+    return website_lang

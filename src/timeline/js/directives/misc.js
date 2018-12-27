@@ -6,7 +6,7 @@
  *
  * @section LICENSE
  *
- * Copyright (c) 2008-2014 OpenShot Studios, LLC
+ * Copyright (c) 2008-2018 OpenShot Studios, LLC
  * <http://www.openshotstudios.com/>. This file is part of
  * OpenShot Video Editor, an open-source project dedicated to
  * delivering high quality video editing and animation solutions to the
@@ -48,8 +48,8 @@ App.directive('dbSlider', function () {
 		link: function (scope, element, attrs) {
 			element.slider({
 			    value: 30,
-			    step: 2,
-			    min: 8,
+			    step: 1,
+			    min: 1,
 			    max: 210,
 			    slide: function(event, ui) {
 			        $("#scaleVal").val(ui.value);

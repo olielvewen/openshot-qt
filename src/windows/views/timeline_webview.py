@@ -1,28 +1,28 @@
-""" 
+"""
  @file
  @brief This file loads the interactive HTML timeline
  @author Noah Figg <eggmunkee@hotmail.com>
  @author Jonathan Thomas <jonathan@openshot.org>
  @author Olivier Girard <eolinwen@gmail.com>
- 
+
  @section LICENSE
- 
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
  to the world.
- 
+
  OpenShot Video Editor is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
  the Free Software Foundation, either version 3 of the License, or
  (at your option) any later version.
- 
+
  OpenShot Video Editor is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  GNU General Public License for more details.
- 
+
  You should have received a copy of the GNU General Public License
  along with OpenShot Library.  If not, see <http://www.gnu.org/licenses/>.
  """
@@ -46,6 +46,8 @@ from classes.app import get_app
 from classes.logger import log
 from classes.query import File, Clip, Transition, Track
 from classes.waveform import get_audio_data
+from classes.thumbnail import GenerateThumbnail
+from classes.conversion import zoomToSeconds, secondsToZoom
 
 try:
     import json
@@ -125,6 +127,8 @@ MENU_TRANSFORM = 0
 MENU_TIME_NONE = 0
 MENU_TIME_FORWARD = 1
 MENU_TIME_BACKWARD = 2
+MENU_TIME_FREEZE = 3
+MENU_TIME_FREEZE_ZOOM = 4
 
 MENU_COPY_ALL = -1
 MENU_COPY_CLIP = 0
@@ -156,8 +160,21 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
     # Path to html file
     html_path = os.path.join(info.PATH, 'timeline', 'index.html')
 
+    @pyqtSlot()
+    def page_ready(self):
+        """Document.Ready event has fired, and is initialized"""
+        self.document_is_ready = True
+
     def eval_js(self, code):
-        return self.page().mainFrame().evaluateJavaScript(code)
+        # Check if document.Ready has fired in JS
+        if not self.document_is_ready:
+            # Not ready, try again in a few milliseconds
+            log.error("TimelineWebView::eval_js() called before document ready event. Script queued: %s" % code)
+            QTimer.singleShot(50, partial(self.eval_js, code))
+            return None
+        else:
+            # Execute JS code
+            return self.page().mainFrame().evaluateJavaScript(code)
 
     # This method is invoked by the UpdateManager each time a change happens (i.e UpdateInterface)
     def changed(self, action):
@@ -177,8 +194,8 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         # Reset the scale when loading new JSON
         if action.type == "load":
             # Set the scale again (to project setting)
-            initial_scale = get_app().project.get(["scale"]) or 20
-            get_app().window.sliderZoom.setValue(initial_scale)
+            initial_scale = get_app().project.get(["scale"]) or 15
+            get_app().window.sliderZoom.setValue(secondsToZoom(initial_scale))
 
     # Javascript callable function to update the project data when a clip changes
     @pyqtSlot(str)
@@ -259,23 +276,13 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
             # Convert path to the correct relative path (based on this folder)
             file_path = file.absolute_path()
 
-            # Reload this reader
-            clip = openshot.Clip(file_path)
-            reader = clip.Reader()
-
-            # Open reader
-            reader.Open()
-
             # Determine if video overlay should be applied to thumbnail
             overlay_path = ""
             if file.data["media_type"] == "video":
                 overlay_path = os.path.join(info.IMAGES_PATH, "overlay.png")
 
-            # Save thumbnail
-            reader.GetFrame(start_frame).Thumbnail(thumb_path, 98, 64, os.path.join(info.IMAGES_PATH, "mask.png"),
-                                         overlay_path, "#000", False)
-            reader.Close()
-            clip.Close()
+            # Create thumbnail image
+            GenerateThumbnail(file_path, thumb_path, start_frame, 98, 64, os.path.join(info.IMAGES_PATH, "mask.png"), overlay_path)
 
             # Update clip_data to point to new thumbnail image
             clip_data["image"] = thumb_path
@@ -418,10 +425,13 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
             # Add split clip menu
             Slice_Menu = QMenu(_("Slice All"), self)
             Slice_Keep_Both = Slice_Menu.addAction(_("Keep Both Sides"))
+            Slice_Keep_Both.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepBothSides")))
             Slice_Keep_Both.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_BOTH, clip_ids, trans_ids, position))
             Slice_Keep_Left = Slice_Menu.addAction(_("Keep Left Side"))
+            Slice_Keep_Left.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepLeftSide")))
             Slice_Keep_Left.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_LEFT, clip_ids, trans_ids, position))
             Slice_Keep_Right = Slice_Menu.addAction(_("Keep Right Side"))
+            Slice_Keep_Right.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepRightSide")))
             Slice_Keep_Right.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_RIGHT, clip_ids, trans_ids, position))
             menu.addMenu(Slice_Menu)
             return menu.popup(QCursor.pos())
@@ -454,7 +464,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         clipboard_clip_ids = [k for k, v in self.copy_clipboard.items() if v.get('id')]
         clipboard_tran_ids = [k for k, v in self.copy_transition_clipboard.items() if v.get('id')]
 
-        # Paste Menu (if entire cilps or transitions are copied)
+        # Paste Menu (if entire clips or transitions are copied)
         if self.copy_clipboard or self.copy_transition_clipboard:
             if len(clipboard_clip_ids) + len(clipboard_tran_ids) > 0:
                 menu = QMenu(self)
@@ -718,6 +728,19 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
             # Add menu to parent
             Time_Menu.addMenu(Speed_Menu)
 
+        # Add Freeze menu options
+        Time_Menu.addSeparator()
+        for freeze_type, trigger_type in [(_("Freeze"), MENU_TIME_FREEZE), (_("Freeze && Zoom"), MENU_TIME_FREEZE_ZOOM)]:
+            Freeze_Menu = QMenu(freeze_type, self)
+
+            for freeze_seconds in [2, 4, 6, 8, 10, 20, 30]:
+                # Add menu option
+                Time_Option = Freeze_Menu.addAction(_('{} seconds').format(freeze_seconds))
+                Time_Option.triggered.connect(partial(self.Time_Triggered, trigger_type, clip_ids, freeze_seconds, playhead_position))
+
+            # Add menu to parent
+            Time_Menu.addMenu(Freeze_Menu)
+
         # Add menu to parent
         menu.addMenu(Time_Menu)
 
@@ -797,13 +820,10 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 # Add split clip menu
                 Slice_Menu = QMenu(_("Slice"), self)
                 Slice_Keep_Both = Slice_Menu.addAction(_("Keep Both Sides"))
-                Slice_Keep_Both.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepBothSides")))
                 Slice_Keep_Both.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_BOTH, [clip_id], [], playhead_position))
                 Slice_Keep_Left = Slice_Menu.addAction(_("Keep Left Side"))
-                Slice_Keep_Left.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepLeftSide")))
                 Slice_Keep_Left.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_LEFT, [clip_id], [], playhead_position))
                 Slice_Keep_Right = Slice_Menu.addAction(_("Keep Right Side"))
-                Slice_Keep_Right.setShortcut(QKeySequence(self.window.getShortcutByName("sliceAllKeepRightSide")))
                 Slice_Keep_Right.triggered.connect(partial(self.Slice_Triggered, MENU_SLICE_KEEP_RIGHT, [clip_id], [], playhead_position))
                 menu.addMenu(Slice_Menu)
 
@@ -812,7 +832,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         Transform_Action.triggered.connect(partial(self.Transform_Triggered, MENU_TRANSFORM, clip_ids))
         menu.addAction(Transform_Action)
 
-        # Add clip display menu (waveform or thunbnail)
+        # Add clip display menu (waveform or thumbnail)
         menu.addSeparator()
         Waveform_Menu = QMenu(_("Display"), self)
         ShowWaveform = Waveform_Menu.addAction(_("Show Waveform"))
@@ -902,9 +922,15 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         # Restore normal cursor
         get_app().restoreOverrideCursor()
 
+        # Start timer to redraw audio
+        self.redraw_audio_timer.start()
+
     def Split_Audio_Triggered(self, action, clip_ids):
         """Callback for split audio context menus"""
         log.info("Split_Audio_Triggered")
+
+        # Get translation method
+        _ = get_app()._tr
 
         # Loop through each selected clip
         for clip_id in clip_ids:
@@ -916,12 +942,12 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 continue
 
             # Filter out audio on the original clip
-            p = openshot.Point(1, 0.0, openshot.CONSTANT) # Override has_audio keyframe to False
-            p_object = json.loads(p.Json())
-            clip.data["has_audio"] = { "Points" : [p_object]}
+            #p = openshot.Point(1, 0.0, openshot.CONSTANT) # Override has_audio keyframe to False
+            #p_object = json.loads(p.Json())
+            #clip.data["has_audio"] = { "Points" : [p_object]}
 
             # Save filter on original clip
-            clip.save()
+            #clip.save()
 
             # Clear audio override
             p = openshot.Point(1, -1.0, openshot.CONSTANT) # Override has_audio keyframe to False
@@ -933,6 +959,9 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
             clip.type = 'insert'
             clip.data.pop('id')
             clip.key.pop(1)
+
+            # Get title of clip
+            clip_title = clip.data["title"]
 
             if action == MENU_SPLIT_AUDIO_SINGLE:
                 # Clear channel filter on new clip
@@ -948,11 +977,11 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 # Adjust the layer, so this new audio clip doesn't overlap the parent
                 clip.data['layer'] = clip.data['layer'] - 1 # Add to layer below clip
 
+                # Adjust the clip title
+                channel_label = _("(all channels)")
+                clip.data["title"] = clip_title + " " + channel_label
                 # Save changes
                 clip.save()
-
-                # Generate waveform for clip
-                self.Show_Waveform_Triggered([clip.id])
 
             if action == MENU_SPLIT_AUDIO_MULTIPLE:
                 # Get # of channels on clip
@@ -975,16 +1004,35 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                     # Adjust the layer, so this new audio clip doesn't overlap the parent
                     clip.data['layer'] = max(clip.data['layer'] - 1, 0) # Add to layer below clip
 
+                    # Adjust the clip title
+                    channel_label = _("(channel %s)") % (channel + 1)
+                    clip.data["title"] = clip_title + " " + channel_label
+
                     # Save changes
                     clip.save()
-
-                    # Generate waveform for clip
-                    self.Show_Waveform_Triggered([clip.id])
 
                     # Remove the ID property from the clip (so next time, it will create a new clip)
                     clip.id = None
                     clip.type = 'insert'
                     clip.data.pop('id')
+
+        for clip_id in clip_ids:
+
+            # Get existing clip object
+            clip = Clip.get(id=clip_id)
+            if not clip:
+                # Invalid clip, skip to next item
+                continue
+
+            # Filter out audio on the original clip
+            p = openshot.Point(1, 0.0, openshot.CONSTANT) # Override has_audio keyframe to False
+            p_object = json.loads(p.Json())
+            clip.data["has_audio"] = { "Points" : [p_object]}
+
+            # Save filter on original clip
+            #clip.save()
+            self.update_clip_data(clip.data, only_basic_props=False, ignore_reader=True)
+            clip.save()
 
     def Layout_Triggered(self, action, clip_ids):
         """Callback for the layout context menus"""
@@ -1391,7 +1439,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 # Apply clipboard to clip (there should only be a single key in this dict)
                 for k,v in self.copy_clipboard[list(self.copy_clipboard)[0]].items():
                     if k != 'id':
-                        # Overwrite clips propeties (which are in the clipboard)
+                        # Overwrite clips properties (which are in the clipboard)
                         clip.data[k] = v
 
                 # Save changes
@@ -1410,11 +1458,99 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 # Apply clipboard to transition (there should only be a single key in this dict)
                 for k, v in self.copy_transition_clipboard[list(self.copy_transition_clipboard)[0]].items():
                     if k != 'id':
-                        # Overwrite transition propeties (which are in the clipboard)
+                        # Overwrite transition properties (which are in the clipboard)
                         tran.data[k] = v
 
                 # Save changes
                 tran.save()
+
+    def Nudge_Triggered(self, action, clip_ids, tran_ids):
+        """Callback for clip nudges"""
+        log.info("Nudging clip(s) and/or transition(s)")
+        left_edge = -1.0
+        right_edge = -1.0
+
+        # Determine how far we're going to nudge (1/2 frame or 0.01s, whichever is larger)
+        fps = get_app().project.get(["fps"])
+        fps_float = float(fps["num"]) / float(fps["den"])
+        nudgeDistance = float(action) / float(fps_float)
+        nudgeDistance /= 2.0	# 1/2 frame
+        if abs(nudgeDistance) < 0.01:
+            nudgeDistance = 0.01 * action	# nudge is less than the minimum of +/- 0.01s
+        log.info("Nudging by %s sec" % nudgeDistance)
+
+        # Loop through each selected clip (find furthest left and right edge)
+        for clip_id in clip_ids:
+            # Get existing clip object
+            clip = Clip.get(id=clip_id)
+            if not clip:
+                # Invalid clip, skip to next item
+                continue
+
+            position = float(clip.data["position"])
+            start_of_clip = float(clip.data["start"])
+            end_of_clip = float(clip.data["end"])
+
+            if position < left_edge or left_edge == -1.0:
+                left_edge = position
+            if position + (end_of_clip - start_of_clip) > right_edge or right_edge == -1.0:
+                right_edge = position + (end_of_clip - start_of_clip)
+
+            # Do not nudge beyond the start of the timeline
+            if left_edge + nudgeDistance < 0.0:
+                log.info("Cannot nudge beyond start of timeline")
+                nudgeDistance = 0
+
+        # Loop through each selected transition (find furthest left and right edge)
+        for tran_id in tran_ids:
+            # Get existing transition object
+            tran = Transition.get(id=tran_id)
+            if not tran:
+                # Invalid transition, skip to next item
+                continue
+
+            position = float(tran.data["position"])
+            start_of_tran = float(tran.data["start"])
+            end_of_tran = float(tran.data["end"])
+
+            if position < left_edge or left_edge == -1.0:
+                left_edge = position
+            if position + (end_of_tran - start_of_tran) > right_edge or right_edge == -1.0:
+                right_edge = position + (end_of_tran - start_of_tran)
+
+            # Do not nudge beyond the start of the timeline
+            if left_edge + nudgeDistance < 0.0:
+                log.info("Cannot nudge beyond start of timeline")
+                nudgeDistance = 0
+
+        # Loop through each selected clip (update position to align clips)
+        for clip_id in clip_ids:
+            # Get existing clip object
+            clip = Clip.get(id=clip_id)
+            if not clip:
+                # Invalid clip, skip to next item
+                continue
+
+            # Do the nudge
+            clip.data['position'] += nudgeDistance
+
+            # Save changes
+            self.update_clip_data(clip.data, only_basic_props=False, ignore_reader=True)
+
+        # Loop through each selected transition (update position to align clips)
+        for tran_id in tran_ids:
+            # Get existing transition object
+            tran = Transition.get(id=tran_id)
+            if not tran:
+                # Invalid transition, skip to next item
+                continue
+
+            # Do the nudge
+            tran.data['position'] += nudgeDistance
+
+            # Save changes
+            self.update_transition_data(tran.data, only_basic_props=False)
+
 
     def Align_Triggered(self, action, clip_ids, tran_ids):
         """Callback for alignment context menus"""
@@ -1597,6 +1733,16 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
 
     def Slice_Triggered(self, action, clip_ids, trans_ids, playhead_position=0):
         """Callback for slice context menus"""
+        # Get FPS from project
+        fps = get_app().project.get(["fps"])
+        fps_num = float(fps["num"])
+        fps_den = float(fps["den"])
+        fps_float = fps_num / fps_den
+        frame_duration = fps_den / fps_num
+
+        # Get the nearest starting frame position to the playhead (this helps to prevent cutting
+        # in-between frames, and thus less likely to repeat or skip a frame).
+        playhead_position = float(round((playhead_position * fps_num) / fps_den ) * fps_den ) / fps_num
 
         # Loop through each clip (using the list of ids)
         for clip_id in clip_ids:
@@ -1648,9 +1794,9 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 position_of_clip = float(right_clip.data["position"])
                 start_of_clip = float(right_clip.data["start"])
 
-                # Set new 'end' of right_clip
-                right_clip.data["position"] = playhead_position
-                right_clip.data["start"] = start_of_clip + (playhead_position - position_of_clip)
+                # Set new 'start' of right_clip (need to bump 1 frame duration more, so we don't repeat a frame)
+                right_clip.data["position"] = (round(float(playhead_position) * fps_float) + 1) / fps_float
+                right_clip.data["start"] = (round(float(clip.data["end"]) * fps_float) + 2) / fps_float
 
                 # Save changes
                 right_clip.save()
@@ -1718,8 +1864,8 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 end_of_tran = float(right_tran.data["end"])
 
                 # Set new 'end' of right_tran
-                right_tran.data["position"] = playhead_position
-                right_tran.data["end"] = end_of_tran - (playhead_position - position_of_tran)
+                right_tran.data["position"] = playhead_position + frame_duration
+                right_tran.data["end"] = end_of_tran - (playhead_position - position_of_tran) + frame_duration
 
                 # Save changes
                 right_tran.save()
@@ -1874,7 +2020,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
             # Save changes
             self.update_clip_data(clip.data, only_basic_props=False, ignore_reader=True)
 
-    def Time_Triggered(self, action, clip_ids, speed="1X"):
+    def Time_Triggered(self, action, clip_ids, speed="1X", playhead_position=0.0):
         """Callback for rotate context menus"""
         log.info(action)
         prop_name = "time"
@@ -1892,75 +2038,185 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
                 # Invalid clip, skip to next item
                 continue
 
+            # Keep original 'end' and 'duration'
+            if "original_data" not in clip.data.keys():
+                clip.data["original_data"] = {"end": clip.data["end"],
+                                              "duration": clip.data["duration"],
+                                              "video_length": clip.data["reader"]["video_length"]}
+
             # Determine the beginning and ending of this animation
             start_animation = 1
 
-            # Calculate speed factor
-            speed_label = speed.replace('X', '')
-            speed_parts = speed_label.split('/')
-            even_multiple = 1
-            if len(speed_parts) == 2:
-                speed_factor = float(speed_parts[0]) / float(speed_parts[1])
-                even_multiple = int(speed_parts[1])
+            # Freeze or Speed?
+            if action in [MENU_TIME_FREEZE, MENU_TIME_FREEZE_ZOOM]:
+                # Get freeze details
+                freeze_seconds = float(speed)
+
+                original_duration = clip.data["duration"]
+                if "original_data" in clip.data.keys():
+                    original_duration = clip.data["original_data"]["duration"]
+
+                print('ORIGINAL DURATION: %s' % original_duration)
+                print(clip.data)
+
+                # Extend end & duration (due to freeze)
+                clip.data["end"] = float(clip.data["end"]) + freeze_seconds
+                clip.data["duration"] = float(clip.data["duration"]) + freeze_seconds
+                clip.data["reader"]["video_length"] = float(clip.data["reader"]["video_length"]) + freeze_seconds
+
+                # Determine start frame from position
+                freeze_length_frames = round(freeze_seconds * fps_float) + 1
+                start_animation_seconds = float(clip.data["start"]) + (playhead_position - float(clip.data["position"]))
+                start_animation_frames = round(start_animation_seconds * fps_float) + 1
+                start_animation_frames_value = start_animation_frames
+                end_animation_seconds = start_animation_seconds + freeze_seconds
+                end_animation_frames = round(end_animation_seconds * fps_float) + 1
+                end_of_clip_seconds = float(clip.data["duration"])
+                end_of_clip_frames = round((end_of_clip_seconds) * fps_float) + 1
+                end_of_clip_frames_value = round((original_duration) * fps_float) + 1
+
+                # Determine volume start and end
+                start_volume_value = 1.0
+
+                # Do we already have a time curve? Look up intersecting frame # from time curve
+                if len(clip.data["time"]["Points"]) > 1:
+                    # Delete last time point (which should be the end of the clip). We have a new end of the clip
+                    # after inserting this freeze.
+                    del clip.data["time"]["Points"][-1]
+
+                    # Find actual clip object from libopenshot
+                    c = None
+                    clips = get_app().window.timeline_sync.timeline.Clips()
+                    for clip_object in clips:
+                        if clip_object.Id() == clip_id:
+                            c = clip_object
+                            break
+                    if c:
+                        # Look up correct position from time curve
+                        start_animation_frames_value = c.time.GetLong(start_animation_frames)
+
+                # Do we already have a volume curve? Look up intersecting frame # from volume curve
+                if len(clip.data["volume"]["Points"]) > 1:
+                    # Find actual clip object from libopenshot
+                    c = None
+                    clips = get_app().window.timeline_sync.timeline.Clips()
+                    for clip_object in clips:
+                        if clip_object.Id() == clip_id:
+                            c = clip_object
+                            break
+                    if c:
+                        # Look up correct volume from time curve
+                        start_volume_value = c.volume.GetValue(start_animation_frames)
+
+                # Create Time Freeze keyframe points
+                p = openshot.Point(start_animation_frames, start_animation_frames_value, openshot.LINEAR)
+                p_object = json.loads(p.Json())
+                clip.data[prop_name]["Points"].append(p_object)
+                p1 = openshot.Point(end_animation_frames, start_animation_frames_value, openshot.LINEAR)
+                p1_object = json.loads(p1.Json())
+                clip.data[prop_name]["Points"].append(p1_object)
+                p2 = openshot.Point(end_of_clip_frames, end_of_clip_frames_value, openshot.LINEAR)
+                p2_object = json.loads(p2.Json())
+                clip.data[prop_name]["Points"].append(p2_object)
+
+                # Create Volume mute keyframe points (so the freeze is silent)
+                p = openshot.Point(start_animation_frames - 1, start_volume_value, openshot.LINEAR)
+                p_object = json.loads(p.Json())
+                clip.data['volume']["Points"].append(p_object)
+                p = openshot.Point(start_animation_frames, 0.0, openshot.LINEAR)
+                p_object = json.loads(p.Json())
+                clip.data['volume']["Points"].append(p_object)
+                p2 = openshot.Point(end_animation_frames - 1, 0.0, openshot.LINEAR)
+                p2_object = json.loads(p2.Json())
+                clip.data['volume']["Points"].append(p2_object)
+                p3 = openshot.Point(end_animation_frames, start_volume_value, openshot.LINEAR)
+                p3_object = json.loads(p3.Json())
+                clip.data['volume']["Points"].append(p3_object)
+
+                # Create zoom keyframe points
+                if action == MENU_TIME_FREEZE_ZOOM:
+                    p = openshot.Point(start_animation_frames, 1.0, openshot.BEZIER)
+                    p_object = json.loads(p.Json())
+                    clip.data['scale_x']["Points"].append(p_object)
+                    p = openshot.Point(start_animation_frames, 1.0, openshot.BEZIER)
+                    p_object = json.loads(p.Json())
+                    clip.data['scale_y']["Points"].append(p_object)
+
+                    diff_halfed = (end_animation_frames - start_animation_frames) / 2.0
+                    p1 = openshot.Point(start_animation_frames + diff_halfed, 1.05, openshot.BEZIER)
+                    p1_object = json.loads(p1.Json())
+                    clip.data['scale_x']["Points"].append(p1_object)
+                    p1 = openshot.Point(start_animation_frames + diff_halfed, 1.05, openshot.BEZIER)
+                    p1_object = json.loads(p1.Json())
+                    clip.data['scale_y']["Points"].append(p1_object)
+
+                    p1 = openshot.Point(end_animation_frames, 1.0, openshot.BEZIER)
+                    p1_object = json.loads(p1.Json())
+                    clip.data['scale_x']["Points"].append(p1_object)
+                    p1 = openshot.Point(end_animation_frames, 1.0, openshot.BEZIER)
+                    p1_object = json.loads(p1.Json())
+                    clip.data['scale_y']["Points"].append(p1_object)
+
             else:
-                speed_factor = float(speed_label)
-                even_multiple = int(speed_factor)
 
-            # Clear all keyframes
-            p = openshot.Point(start_animation, 0.0, openshot.LINEAR)
-            p_object = json.loads(p.Json())
-            clip.data[prop_name] = { "Points" : [p_object]}
+                # Calculate speed factor
+                speed_label = speed.replace('X', '')
+                speed_parts = speed_label.split('/')
+                even_multiple = 1
+                if len(speed_parts) == 2:
+                    speed_factor = float(speed_parts[0]) / float(speed_parts[1])
+                    even_multiple = int(speed_parts[1])
+                else:
+                    speed_factor = float(speed_label)
+                    even_multiple = int(speed_factor)
 
-            # Reset original end & duration (if available)
-            if "original_data" in clip.data.keys():
-                clip.data["end"] = clip.data["original_data"]["end"]
-                clip.data["duration"] = clip.data["original_data"]["duration"]
-                clip.data["reader"]["video_length"] = clip.data["original_data"]["video_length"]
-                clip.data.pop("original_data")
+                # Clear all keyframes
+                p = openshot.Point(start_animation, 0.0, openshot.LINEAR)
+                p_object = json.loads(p.Json())
+                clip.data[prop_name] = { "Points" : [p_object]}
 
-            # Get the ending frame
-            end_of_clip = round(float(clip.data["end"]) * fps_float) + 1
+                # Reset original end & duration (if available)
+                if "original_data" in clip.data.keys():
+                    clip.data["end"] = clip.data["original_data"]["end"]
+                    clip.data["duration"] = clip.data["original_data"]["duration"]
+                    clip.data["reader"]["video_length"] = clip.data["original_data"]["video_length"]
+                    clip.data.pop("original_data")
 
-            # Determine the beginning and ending of this animation
-            start_animation = round(float(clip.data["start"]) * fps_float) + 1
-            duration_animation = self.round_to_multiple(end_of_clip - start_animation, even_multiple)
-            end_animation = start_animation + duration_animation
+                # Get the ending frame
+                end_of_clip = round(float(clip.data["end"]) * fps_float) + 1
 
-            if action == MENU_TIME_FORWARD:
-                # Add keyframes
-                start = openshot.Point(start_animation, start_animation, openshot.LINEAR)
-                start_object = json.loads(start.Json())
-                clip.data[prop_name] = { "Points" : [start_object]}
-                end = openshot.Point(start_animation + (duration_animation / speed_factor), end_animation, openshot.LINEAR)
-                end_object = json.loads(end.Json())
-                clip.data[prop_name]["Points"].append(end_object)
-                # Keep original 'end' and 'duration'
-                if "original_data" not in clip.data.keys():
-                    clip.data["original_data"] = { "end" : clip.data["end"],
-                                                   "duration" : clip.data["duration"],
-                                                   "video_length" : clip.data["reader"]["video_length"] }
-                # Adjust end & duration
-                clip.data["end"] = (start_animation + (duration_animation / speed_factor)) / fps_float
-                clip.data["duration"] = self.round_to_multiple(clip.data["duration"] / speed_factor, even_multiple)
-                clip.data["reader"]["video_length"] = str(self.round_to_multiple(float(clip.data["reader"]["video_length"]) / speed_factor, even_multiple))
+                # Determine the beginning and ending of this animation
+                start_animation = round(float(clip.data["start"]) * fps_float) + 1
+                duration_animation = self.round_to_multiple(end_of_clip - start_animation, even_multiple)
+                end_animation = start_animation + duration_animation
 
-            if action == MENU_TIME_BACKWARD:
-                # Add keyframes
-                start = openshot.Point(start_animation, end_animation, openshot.LINEAR)
-                start_object = json.loads(start.Json())
-                clip.data[prop_name] = { "Points" : [start_object]}
-                end = openshot.Point(start_animation + (duration_animation / speed_factor), start_animation, openshot.LINEAR)
-                end_object = json.loads(end.Json())
-                clip.data[prop_name]["Points"].append(end_object)
-                # Keep original 'end' and 'duration'
-                if "original_data" not in clip.data.keys():
-                    clip.data["original_data"] = { "end" : clip.data["end"],
-                                                   "duration" : clip.data["duration"],
-                                                   "video_length" : clip.data["reader"]["video_length"] }
-                # Adjust end & duration
-                clip.data["end"] = (start_animation + (duration_animation / speed_factor)) / fps_float
-                clip.data["duration"] = self.round_to_multiple(clip.data["duration"] / speed_factor, even_multiple)
-                clip.data["reader"]["video_length"] = str(self.round_to_multiple(float(clip.data["reader"]["video_length"]) / speed_factor, even_multiple))
+                if action == MENU_TIME_FORWARD:
+                    # Add keyframes
+                    start = openshot.Point(start_animation, start_animation, openshot.LINEAR)
+                    start_object = json.loads(start.Json())
+                    clip.data[prop_name] = { "Points" : [start_object]}
+                    end = openshot.Point(start_animation + (duration_animation / speed_factor), end_animation, openshot.LINEAR)
+                    end_object = json.loads(end.Json())
+                    clip.data[prop_name]["Points"].append(end_object)
+
+                    # Adjust end & duration
+                    clip.data["end"] = (start_animation + (duration_animation / speed_factor)) / fps_float
+                    clip.data["duration"] = self.round_to_multiple(clip.data["duration"] / speed_factor, even_multiple)
+                    clip.data["reader"]["video_length"] = str(self.round_to_multiple(float(clip.data["reader"]["video_length"]) / speed_factor, even_multiple))
+
+                if action == MENU_TIME_BACKWARD:
+                    # Add keyframes
+                    start = openshot.Point(start_animation, end_animation, openshot.LINEAR)
+                    start_object = json.loads(start.Json())
+                    clip.data[prop_name] = { "Points" : [start_object]}
+                    end = openshot.Point(start_animation + (duration_animation / speed_factor), start_animation, openshot.LINEAR)
+                    end_object = json.loads(end.Json())
+                    clip.data[prop_name]["Points"].append(end_object)
+
+                    # Adjust end & duration
+                    clip.data["end"] = (start_animation + (duration_animation / speed_factor)) / fps_float
+                    clip.data["duration"] = self.round_to_multiple(clip.data["duration"] / speed_factor, even_multiple)
+                    clip.data["reader"]["video_length"] = str(self.round_to_multiple(float(clip.data["reader"]["video_length"]) / speed_factor, even_multiple))
 
             # Save changes
             self.update_clip_data(clip.data, only_basic_props=False, ignore_reader=True)
@@ -2128,7 +2384,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         clipboard_tran_ids = [k for k, v in self.copy_transition_clipboard.items() if v.get('id')]
         # Determine if the paste menu should be shown
         if self.copy_transition_clipboard and len(clipboard_clip_ids) + len(clipboard_tran_ids) == 0:
-            # Paste Menu (Only show when partial transition clipboard avaialble)
+            # Paste Menu (Only show when partial transition clipboard available)
             Paste_Tran = menu.addAction(_("Paste"))
             Paste_Tran.triggered.connect(partial(self.Paste_Triggered, MENU_PASTE, 0.0, 0, [], tran_ids))
 
@@ -2288,8 +2544,11 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
     def update_zoom(self, newValue):
         _ = get_app()._tr
 
+        # Convert slider value (passed in) to a scale (in seconds)
+        newScale = zoomToSeconds(newValue)
+
         # Set zoom label
-        self.window.zoomScaleLabel.setText(_("{} seconds").format(newValue))
+        self.window.zoomScaleLabel.setText(_("{} seconds").format(newScale))
 
         # Determine X coordinate of cursor (to center zoom on)
         cursor_y = self.mapFromGlobal(self.cursor().pos()).y()
@@ -2298,15 +2557,17 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         else:
             cursor_x = 0
 
-        # Get access to timeline scope and set scale to zoom slider value (passed in)
-        cmd = JS_SCOPE_SELECTOR + ".setScale(" + str(newValue) + "," + str(cursor_x) + ");"
+        # Get access to timeline scope and set scale to new computed value
+        cmd = JS_SCOPE_SELECTOR + ".setScale(" + str(newScale) + "," + str(cursor_x) + ");"
         self.page().mainFrame().evaluateJavaScript(cmd)
 
         # Start timer to redraw audio
         self.redraw_audio_timer.start()
 
         # Save current zoom
-        get_app().updates.update(["scale"], newValue)
+        get_app().updates.ignore_history = True
+        get_app().updates.update(["scale"], newScale)
+        get_app().updates.ignore_history = False
 
     def keyPressEvent(self, event):
         """ Keypress callback for timeline """
@@ -2561,7 +2822,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         # Get position of cursor
         pos = event.posF()
 
-        if self.item_type in ["clip", "transition"]:
+        if self.item_type in ["clip", "transition"] and self.item_id:
             # Update most recent clip
             self.eval_js(JS_SCOPE_SELECTOR + ".UpdateRecentItemJSON('" + self.item_type + "', '" + self.item_id + "');")
 
@@ -2576,16 +2837,13 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
 
             # Add clips for each file dropped
             for uri in event.mimeData().urls():
-                file_url = urlparse(uri.toString())
-                if file_url.scheme == "file":
-                    filepath = file_url.path
-                    if sys.platform == "win32":
-                        filepath = filepath[1:]  # Remove / at beginning of path (just for Windows)
-                    if os.path.exists(filepath.encode('UTF-8')) and os.path.isfile(filepath.encode('UTF-8')):
-                        # Valid file, so create clip for it
-                        for file in File.filter(path=filepath):
-                            # Insert clip for this file at this position
-                            self.addClip([file.id], pos)
+                filepath = uri.toLocalFile()
+                if os.path.exists(filepath) and os.path.isfile(filepath):
+                    # Valid file, so create clip for it
+                    log.info('Adding clip for {}'.format(os.path.basename(filepath)))
+                    for file in File.filter(path=filepath):
+                        # Insert clip for this file at this position
+                        self.addClip([file.id], pos)
 
         # Clear new clip
         self.new_item = False
@@ -2667,6 +2925,7 @@ class TimelineWebView(QWebView, updates.UpdateInterface):
         self.window = window
         self.setAcceptDrops(True)
         self.last_position_frames = None
+        self.document_is_ready = False
 
         # Get settings
         self.settings = settings.get_settings()

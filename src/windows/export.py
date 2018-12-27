@@ -5,7 +5,7 @@
 
  @section LICENSE
 
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -24,7 +24,7 @@
  You should have received a copy of the GNU General Public License
  along with OpenShot Library.  If not, see <http://www.gnu.org/licenses/>.
  """
-
+import time
 import os
 import locale
 import xml.dom.minidom as xml
@@ -36,6 +36,7 @@ import openshot  # Python module for libopenshot (required video editing module 
 
 from classes import info, ui_util, settings
 from classes.app import get_app
+from classes.query import File
 from classes.logger import log
 from classes.metrics import *
 
@@ -92,12 +93,15 @@ class Export(QDialog):
         # Pause playback (to prevent crash since we are fixing to change the timeline's max size)
         get_app().window.actionPlay_trigger(None, force="pause")
 
-        # Clear timeline preview cache (to get more avaiable memory)
+        # Clear timeline preview cache (to get more available memory)
         get_app().window.timeline_sync.timeline.ClearAllCache()
 
         # Hide audio channels
         self.lblChannels.setVisible(False)
         self.txtChannels.setVisible(False)
+
+        # Set OMP thread disabled flag (for stability)
+        os.environ['OS2_OMP_THREADS'] = "0"
 
         # Get the original timeline settings
         width = get_app().window.timeline_sync.timeline.info.width
@@ -151,10 +155,10 @@ class Export(QDialog):
             self.txtFileName.setText(filename.replace("_", " ").replace("-", " ").capitalize())
 
         # Default image type
-        self.txtImageFormat.setText("%05.png")
+        self.txtImageFormat.setText("-%05d.png")
 
         # Loop through Export To options
-        export_options = [_("Video & Audio"), _("Image Sequence")]
+        export_options = [_("Video & Audio"), _("Video Only"), _("Audio Only"), _("Image Sequence")]
         for option in export_options:
             # append profile to list
             self.cboExportTo.addItem(option)
@@ -184,7 +188,7 @@ class Export(QDialog):
         self.cboChannelLayout.currentIndexChanged.connect(self.updateChannels)
         get_app().window.ExportFrame.connect(self.updateProgressBar)
 
-        # ********* Advaned Profile List **********
+        # ********* Advanced Profile List **********
         # Loop through profiles
         self.profile_names = []
         self.profile_paths = {}
@@ -284,7 +288,10 @@ class Export(QDialog):
 
     def updateProgressBar(self, path, start_frame, end_frame, current_frame):
         """Update progress bar during exporting"""
+        percentage_string = "%4.1f%% " % (( current_frame - start_frame ) / ( end_frame - start_frame ) * 100)
         self.progressExportVideo.setValue(current_frame)
+        self.progressExportVideo.setFormat(percentage_string)
+        self.setWindowTitle("%s %s" % (percentage_string, path))
 
     def updateChannels(self):
         """Update the # of channels to match the channel layout"""
@@ -334,8 +341,6 @@ class Export(QDialog):
         self.timeline_length_int = round(timeline_length * fps) + 1
 
         # Set the min and max frame numbers for this project
-        self.txtStartFrame.setMaximum(self.timeline_length_int)
-        self.txtEndFrame.setMaximum(self.timeline_length_int)
         self.txtStartFrame.setValue(1)
         self.txtEndFrame.setValue(self.timeline_length_int)
 
@@ -415,18 +420,23 @@ class Export(QDialog):
         selected_target = widget.itemData(index)
         log.info(selected_target)
 
-        # Clear the following options
-        self.cboSimpleVideoProfile.clear()
-        self.cboSimpleQuality.clear()
-
         # get translations
         app = get_app()
         _ = app._tr
 
-
         # don't do anything if the combo has been cleared
         if selected_target:
             profiles_list = []
+
+            # Clear the following options (and remember current settings)
+            previous_quality = self.cboSimpleQuality.currentIndex()
+            if previous_quality < 0:
+                previous_quality = self.cboSimpleQuality.count() - 1
+            previous_profile = self.cboSimpleVideoProfile.currentIndex()
+            if previous_profile < 0:
+                previous_profile = self.selected_profile_index
+            self.cboSimpleVideoProfile.clear()
+            self.cboSimpleQuality.clear()
 
             # parse the xml to return suggested profiles
             profile_index = 0
@@ -470,13 +480,29 @@ class Export(QDialog):
                     self.txtVideoFormat.setText(vf[0].childNodes[0].data)
                     vc = xmldoc.getElementsByTagName("videocodec")
                     self.txtVideoCodec.setText(vc[0].childNodes[0].data)
-                    ac = xmldoc.getElementsByTagName("audiocodec")
-                    self.txtAudioCodec.setText(ac[0].childNodes[0].data)
                     sr = xmldoc.getElementsByTagName("samplerate")
                     self.txtSampleRate.setValue(int(sr[0].childNodes[0].data))
                     c = xmldoc.getElementsByTagName("audiochannels")
                     self.txtChannels.setValue(int(c[0].childNodes[0].data))
                     c = xmldoc.getElementsByTagName("audiochannellayout")
+
+                    # check for compatible audio codec
+                    ac = xmldoc.getElementsByTagName("audiocodec")
+                    audio_codec_name = ac[0].childNodes[0].data
+                    if audio_codec_name == "aac":
+                        # Determine which version of AAC encoder is available
+                        if openshot.FFmpegWriter.IsValidCodec("libfaac"):
+                            self.txtAudioCodec.setText("libfaac")
+                        elif openshot.FFmpegWriter.IsValidCodec("libvo_aacenc"):
+                            self.txtAudioCodec.setText("libvo_aacenc")
+                        elif openshot.FFmpegWriter.IsValidCodec("aac"):
+                            self.txtAudioCodec.setText("aac")
+                        else:
+                            # fallback audio codec
+                            self.txtAudioCodec.setText("ac3")
+                    else:
+                        # fallback audio codec
+                        self.txtAudioCodec.setText(audio_codec_name)
 
                     layout_index = 0
                     for layout in self.channel_layout_choices:
@@ -491,7 +517,7 @@ class Export(QDialog):
 
             if all_profiles:
                 # select the project's current profile
-                self.cboSimpleVideoProfile.setCurrentIndex(self.selected_profile_index)
+                self.cboSimpleVideoProfile.setCurrentIndex(previous_profile)
 
             # set the quality combo
             # only populate with quality settings that exist
@@ -503,7 +529,7 @@ class Export(QDialog):
                 self.cboSimpleQuality.addItem(_("High"), "High")
 
             # Default to the highest quality setting
-            self.cboSimpleQuality.setCurrentIndex(self.cboSimpleQuality.count() - 1)
+            self.cboSimpleQuality.setCurrentIndex(previous_quality)
 
     def cboSimpleVideoProfile_index_changed(self, widget, index):
         selected_profile_path = widget.itemData(index)
@@ -587,6 +613,10 @@ class Export(QDialog):
     def accept(self):
         """ Start exporting video """
 
+        # get translations
+        app = get_app()
+        _ = app._tr
+
         # Disable controls
         self.txtFileName.setEnabled(False)
         self.txtExportFolder.setEnabled(False)
@@ -594,16 +624,34 @@ class Export(QDialog):
         self.export_button.setEnabled(False)
         self.exporting = True
 
+        # Determine type of export (video+audio, video, audio, image sequences)
+        # _("Video & Audio"), _("Video Only"), _("Audio Only"), _("Image Sequence")
+        export_type = self.cboExportTo.currentText()
+
         # Determine final exported file path
-        file_name_with_ext = "%s.%s" % (self.txtFileName.text().strip(), self.txtVideoFormat.text().strip())
+        if export_type != _("Image Sequence"):
+            file_name_with_ext = "%s.%s" % (self.txtFileName.text().strip(), self.txtVideoFormat.text().strip())
+        else:
+            file_name_with_ext = "%s%s" % (self.txtFileName.text().strip(), self.txtImageFormat.text().strip())
         export_file_path = os.path.join(self.txtExportFolder.text().strip(), file_name_with_ext)
         log.info(export_file_path)
 
         # Translate object
         _ = get_app()._tr
 
+        file = File.get(path=export_file_path)
+        if file:
+            ret = QMessageBox.question(self, _("Export Video"), _("%s is an input file.\nPlease choose a different name.") % file_name_with_ext,
+                                       QMessageBox.Ok)
+            self.txtFileName.setEnabled(True)
+            self.txtExportFolder.setEnabled(True)
+            self.tabWidget.setEnabled(True)
+            self.export_button.setEnabled(True)
+            self.exporting = False
+            return
+
         # Handle exception
-        if os.path.exists(export_file_path):
+        if os.path.exists(export_file_path) and export_type in [_("Video & Audio"), _("Video Only"), _("Audio Only")]:
             # File already exists! Prompt user
             ret = QMessageBox.question(self, _("Export Video"), _("%s already exists.\nDo you want to replace it?") % file_name_with_ext,
                                        QMessageBox.No | QMessageBox.Yes)
@@ -636,6 +684,15 @@ class Export(QDialog):
                           "audio_bitrate": int(self.convert_to_bytes(self.txtAudioBitrate.text()))
                           }
 
+        # Override vcodec and format for Image Sequences
+        if export_type == _("Image Sequence"):
+            image_ext = os.path.splitext(self.txtImageFormat.text().strip())[1].replace(".", "")
+            video_settings["vformat"] = image_ext
+            if image_ext in ["jpg", "jpeg"]:
+                video_settings["vcodec"] = "mjpeg"
+            else:
+                video_settings["vcodec"] = image_ext
+
         # Set MaxSize (so we don't have any downsampling)
         self.timeline.SetMaxSize(video_settings.get("width"), video_settings.get("height"))
 
@@ -648,36 +705,52 @@ class Export(QDialog):
             w = openshot.FFmpegWriter(export_file_path)
 
             # Set video options
-            w.SetVideoOptions(True,
-                              video_settings.get("vcodec"),
-                              openshot.Fraction(video_settings.get("fps").get("num"),
-                                                video_settings.get("fps").get("den")),
-                              video_settings.get("width"),
-                              video_settings.get("height"),
-                              openshot.Fraction(video_settings.get("pixel_ratio").get("num"),
-                                                video_settings.get("pixel_ratio").get("den")),
-                              False,
-                              False,
-                              video_settings.get("video_bitrate"))
+            if export_type in [_("Video & Audio"), _("Video Only"), _("Image Sequence")]:
+                w.SetVideoOptions(True,
+                                  video_settings.get("vcodec"),
+                                  openshot.Fraction(video_settings.get("fps").get("num"),
+                                                    video_settings.get("fps").get("den")),
+                                  video_settings.get("width"),
+                                  video_settings.get("height"),
+                                  openshot.Fraction(video_settings.get("pixel_ratio").get("num"),
+                                                    video_settings.get("pixel_ratio").get("den")),
+                                  False,
+                                  False,
+                                  video_settings.get("video_bitrate"))
 
             # Set audio options
-            w.SetAudioOptions(True,
-                              audio_settings.get("acodec"),
-                              audio_settings.get("sample_rate"),
-                              audio_settings.get("channels"),
-                              audio_settings.get("channel_layout"),
-                              audio_settings.get("audio_bitrate"))
+            if export_type in [_("Video & Audio"), _("Audio Only")]:
+                w.SetAudioOptions(True,
+                                  audio_settings.get("acodec"),
+                                  audio_settings.get("sample_rate"),
+                                  audio_settings.get("channels"),
+                                  audio_settings.get("channel_layout"),
+                                  audio_settings.get("audio_bitrate"))
 
             # Open the writer
             w.Open()
 
             # Notify window of export started
+            export_file_path = ""
             get_app().window.ExportStarted.emit(export_file_path, video_settings.get("start_frame"), video_settings.get("end_frame"))
 
+            progressstep = max(1 , round(( video_settings.get("end_frame") - video_settings.get("start_frame") ) / 1000))
+            start_time_export = time.time()
+            start_frame_export = video_settings.get("start_frame")
+            end_frame_export = video_settings.get("end_frame")
             # Write each frame in the selected range
             for frame in range(video_settings.get("start_frame"), video_settings.get("end_frame")):
                 # Update progress bar (emit signal to main window)
-                get_app().window.ExportFrame.emit(export_file_path, video_settings.get("start_frame"), video_settings.get("end_frame"), frame)
+                if (frame % progressstep) == 0:
+                    end_time_export = time.time()
+                    if ((( frame - start_frame_export ) != 0) & (( end_time_export - start_time_export ) != 0)):
+                        seconds_left = round(( start_time_export - end_time_export )*( frame - end_frame_export )/( frame - start_frame_export ))
+                        fps_encode = ((frame - start_frame_export)/(end_time_export-start_time_export))
+                        export_file_path =  _("%(hours)d:%(minutes)02d:%(seconds)02d Remaining (%(fps)5.2f FPS)") % { 'hours' : seconds_left / 3600,
+                                                                                                                      'minutes': (seconds_left / 60) % 60,
+                                                                                                                      'seconds': seconds_left % 60,
+                                                                                                                      'fps': fps_encode }
+                    get_app().window.ExportFrame.emit(export_file_path, video_settings.get("start_frame"), video_settings.get("end_frame"), frame)
 
                 # Process events (to show the progress bar moving)
                 QCoreApplication.processEvents()
@@ -738,10 +811,22 @@ class Export(QDialog):
         # Clear all cache
         self.timeline.ClearAllCache()
 
+        # Re-set OMP thread enabled flag
+        if self.s.get("omp_threads_enabled"):
+            os.environ['OS2_OMP_THREADS'] = "1"
+        else:
+            os.environ['OS2_OMP_THREADS'] = "0"
+
         # Accept dialog
         super(Export, self).accept()
 
     def reject(self):
+        # Re-set OMP thread enabled flag
+        if self.s.get("omp_threads_enabled"):
+            os.environ['OS2_OMP_THREADS'] = "1"
+        else:
+            os.environ['OS2_OMP_THREADS'] = "0"
+
         # Cancel dialog
         self.exporting = False
         super(Export, self).reject()

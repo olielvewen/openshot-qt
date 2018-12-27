@@ -6,7 +6,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -67,11 +67,12 @@ fh = RotatingFileHandler(
 fh.setFormatter(formatter)
 log.addHandler(fh)
 
-# Route stdout and stderr to logger (custom handler)
-if not getattr(sys, 'frozen', False):
-    so = StreamToLogger(log, logging.INFO)
-    sys.stdout = so
+def reroute_output():
+    """Route stdout and stderr to logger (custom handler)"""
+    if not getattr(sys, 'frozen', False):
+        so = StreamToLogger(log, logging.INFO)
+        sys.stdout = so
 
-    se = StreamToLogger(log, logging.ERROR)
-    sys.stderr = se
+        se = StreamToLogger(log, logging.ERROR)
+        sys.stderr = se
 

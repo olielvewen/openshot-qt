@@ -27,23 +27,26 @@ Import Files
 ------------
 There are many ways to import media files into OpenShot.
 
-====================  ============
-Name                  Description
-====================  ============
-Drag and Drop         Drag and drop the files from your file manager (file explorer, finder, etc...)
-Right Click->Import   Right click in the **Project Files** panel, choose **Import Files...**
-File Menu->Import     File menu->Import Files...
-Import Files Toolbar  Click the **Import Files...** toolbar button (on the top menu)
-====================  ============
+.. table::
+     :widths: 25
 
-.. image:: _static/quick-start-drop-files.jpg
+     ====================  ============
+     Name                  Description
+     ====================  ============
+     Drag and Drop         Drag and drop the files from your file manager (file explorer, finder, etc...)
+     Right Click\→Import   Right click in the **Project Files** panel, choose **Import Files...**
+     File Menu\→Import     File menu\→Import Files...
+     Import Files Toolbar  Click the **Import Files...** toolbar button (on the top menu)
+     ====================  ============
+
+.. image:: images/quick-start-drop-files.jpg
 
 File Menu
 ---------
 To view the file menu, right click on a file (in the **Project Files** panel). Here are the actions you can use from the
 file menu.
 
-.. image:: _static/file-menu.jpg
+.. image:: images/file-menu.jpg
 
 ====================  ============
 Name                  Description
@@ -66,16 +69,19 @@ purpose. Right click on a file, and choose Split Clip... from the file menu. Thi
 dialog to quickly cut out as many small clips as you need. The dialog stays open after you create a clip, to allow you
 to repeat the steps for your next clip. When you are finished, simply close the dialog.
 
-.. image:: _static/file-split-dialog.jpg
+.. image:: images/file-split-dialog.jpg
 
-==  ==================  ============
-#   Name                Description
-==  ==================  ============
-1   Start of Clip       Choose the starting frame of your clip by clicking this button
-2   End of Clip         Choose the ending frame of your clip by clicking this button
-3   Name of Clip        Enter an optional name
-4   Create Clip         Create the clip (which resets this dialog, so you can repeat these steps for each clip)
-==  ==================  ============
+.. table::
+     :widths: 5 20
+
+     ==  ==================  ============
+     #   Name                Description
+     ==  ==================  ============
+     1   Start of Clip       Choose the starting frame of your clip by clicking this button
+     2   End of Clip         Choose the ending frame of your clip by clicking this button
+     3   Name of Clip        Enter an optional name
+     4   Create Clip         Create the clip (which resets this dialog, so you can repeat these steps for each clip)
+     ==  ==================  ============
 
 Add to Timeline
 ---------------
@@ -83,18 +89,21 @@ In certain cases, you might need to add many files to the timeline at the same t
 or a large number of short video clips. The **Add to Timeline** dialog can automate this task for you. First, select
 all files you need to add, right click, and choose Add to Timeline.
 
-.. image:: _static/file-add-to-timeline.jpg
+.. image:: images/file-add-to-timeline.jpg
 
-==  ==================  ============
-#   Name                Description
-==  ==================  ============
-1   Selected Files      The list of selected files that need to be added to the timeline
-2   Order of Files      Use these buttons to reorder the list of files (move up, move down, randomize, remove)
-3   Timeline Position   Choose the starting position and track where these files need to be inserted on the timeline
-4   Fade Options        Fade in, fade out, both, or none
-5   Zoom Options        Zoom in, zoom out, or none
-6   Transitions         Choose a specific transition to use between files, random, or none
-==  ==================  ============
+.. table::
+     :widths: 5 28
+
+     ==  ==================  ============
+     #   Name                Description
+     ==  ==================  ============
+     1   Selected Files      The list of selected files that need to be added to the timeline
+     2   Order of Files      Use these buttons to reorder the list of files (move up, move down, randomize, remove)
+     3   Timeline Position   Choose the starting position and track where these files need to be inserted on the timeline
+     4   Fade Options        Fade in, fade out, both, or none
+     5   Zoom Options        Zoom in, zoom out, or none
+     6   Transitions         Choose a specific transition to use between files, random, or none
+     ==  ==================  ============
 
 Properties
 ----------
@@ -102,11 +111,15 @@ To view the properties of any imported file in your video project, right click o
 This will launch the file properties dialog, which displays information about your media file. For certain types of images
 (i.e. image sequences), you can adjust the frame rate on this dialog also.
 
-.. image:: _static/file-properties.jpg
+.. image:: images/file-properties.jpg
 
-==  ====================  ============
-#   Name                  Description
-==  ====================  ============
-1   File Properties       Select an image sequence in the **Project Files** panel, right click and choose **File Properties**
-2   Frame Rate            For image sequences, you can also adjust the frame rate of the animation
-==  ====================  ============
+.. table::
+     :widths: 5 24
+     
+     ==  ====================  ============
+     #   Name                  Description
+     ==  ====================  ============
+     1   File Properties       Select an image sequence in the **Project Files** panel, right click and choose **File Properties**
+     2   Frame Rate            For image sequences, you can also adjust the frame rate of the animation
+     ==  ====================  ============
+

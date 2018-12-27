@@ -7,7 +7,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -46,7 +46,7 @@ try:
     # Enable High-DPI resolutions
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 except AttributeError:
-    pass # Quitely fail for older Qt5 versions
+    pass # Quietly fail for older Qt5 versions
 
 
 def get_app():
@@ -75,17 +75,13 @@ class OpenShotApp(QApplication):
         except:
             pass
 
-        # Setup appication
+        # Setup application
         self.setApplicationName('openshot')
         self.setApplicationVersion(info.SETUP['version'])
 
         # Init settings
         self.settings = settings.SettingStore()
-        try:
-            self.settings.load()
-        except Exception as ex:
-            log.error("Couldn't load user settings. Exiting.\n{}".format(ex))
-            exit()
+        self.settings.load()
 
         # Init and attach exception handler
         from classes import exceptions
@@ -97,7 +93,7 @@ class OpenShotApp(QApplication):
         # Detect minimum libopenshot version
         _ = self._tr
         libopenshot_version = openshot.GetVersion().ToString()
-        if libopenshot_version < info.MINIMUM_LIBOPENSHOT_VERSION:
+        if mode != "unittest" and libopenshot_version < info.MINIMUM_LIBOPENSHOT_VERSION:
             QMessageBox.warning(None, _("Wrong Version of libopenshot Detected"),
                                       _("<b>Version %(minimum_version)s is required</b>, but %(current_version)s was detected. Please update libopenshot or download our latest installer.") %
                                 {"minimum_version": info.MINIMUM_LIBOPENSHOT_VERSION, "current_version": libopenshot_version})
@@ -163,6 +159,10 @@ class OpenShotApp(QApplication):
         from windows.main_window import MainWindow
         self.window = MainWindow(mode)
 
+        # Reset undo/redo history
+        self.updates.reset()
+        self.window.updateStatusChanged(False, False)
+
         log.info('Process command-line arguments: %s' % args)
         if len(args[0]) == 2:
             path = args[0][1]
@@ -172,10 +172,9 @@ class OpenShotApp(QApplication):
             else:
                 # Auto import media file
                 self.window.filesTreeView.add_file(path)
-
-        # Reset undo/redo history
-        self.updates.reset()
-        self.window.updateStatusChanged(False, False)
+        else:
+            # Recover backup file (this can't happen until after the Main Window has completely loaded)
+            self.window.RecoverBackup.emit()
 
     def _tr(self, message):
         return self.translate("", message)

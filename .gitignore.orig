@@ -1,0 +1,13 @@
+*.DS_Store
+.idea
+.settings
+idea/*
+<<<<<<< HEAD
+*__pycache__
+=======
+doc/_build
+**/__pycache__/
+build
+dist
+openshot_qt.egg-info
+>>>>>>> osqt/master

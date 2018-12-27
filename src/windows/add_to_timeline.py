@@ -6,7 +6,7 @@
 
  @section LICENSE
 
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -485,7 +485,8 @@ class AddToTimeline(QDialog):
         tracks = Track.filter()
         for track in reversed(tracks):
             # Add to dropdown
-            self.cmbTrack.addItem(_('Track %s' % track.data['number']), track.data['number'])
+            track_name = track.data['label'] or _("Track %s") % track.data['number']
+            self.cmbTrack.addItem(track_name, track.data['number'])
 
         # Add all fade options
         self.cmbFade.addItem(_('None'), None)

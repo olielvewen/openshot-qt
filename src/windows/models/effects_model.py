@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -108,14 +108,6 @@ class EffectsModel():
             log.info("category: %s" % category)
 
             # Filter out effect (if needed)
-            if not win.actionEffectsShowAll.isChecked():
-                if win.actionEffectsShowVideo.isChecked():
-                    if not category == "Video":
-                        continue  # to next file, didn't match filter
-                elif win.actionEffectsShowAudio.isChecked():
-                    if not category == "Audio":
-                        continue  # to next file, didn't match filter
-
             if win.effectsFilter.text() != "":
                 if not win.effectsFilter.text().lower() in self.app._tr(title).lower() and not win.effectsFilter.text().lower() in self.app._tr(description).lower():
                     continue

@@ -126,12 +126,13 @@
     "setting": "recent_projects"
   },
   {
-    "value": "HDV 720 24p",
+    "value": "HD 720p 30 fps",
     "title": "Default Profile",
     "category": "Profiles",
     "setting": "default-profile",
     "type": "dropdown",
-    "values": []
+    "values": [],
+    "restart": true
   },
   {
     "max": 128000,
@@ -212,6 +213,15 @@
     "setting": "autosave-interval",
     "value": 3.0,
     "type": "spinner"
+  },
+  {
+    "max": 999,
+    "title": "History Limit (# of undo/redo)",
+    "category": "Autosave",
+    "min": 0,
+    "setting": "history-limit",
+    "value": 20,
+    "type": "spinner-int"
   },
   {
     "title": "Cache Mode",
@@ -317,6 +327,22 @@
   },
   {
     "value": true,
+    "title": "Enable Hardware Decode",
+    "type": "hidden",
+    "restart": true,
+    "category": "Performance",
+    "setting": "hardware_decode"
+  },
+  {
+    "value": true,
+    "title": "Process Video Frames in Parallel (Experimental)",
+    "type": "bool",
+    "restart": true,
+    "category": "Performance",
+    "setting": "omp_threads_enabled"
+  },
+  {
+    "value": true,
     "title": "",
     "type": "hidden",
     "category": "Tutorial",
@@ -329,8 +355,6 @@
     "category": "Tutorial",
     "setting": "tutorial_ids"
   },
-
-
 
   {
     "category": "Keyboard",
@@ -703,6 +727,46 @@
     "restart": true,
     "setting": "actionProperties",
     "value": "Ctrl+I",
+    "type": "text"
+  },
+  {
+    "category": "Keyboard",
+    "title": "Transform",
+    "restart": true,
+    "setting": "actionTransform",
+    "value": "Ctrl+R",
+    "type": "text"
+  },
+  {
+    "category": "Keyboard",
+    "title": "Insert Keyframe",
+    "restart": true,
+    "setting": "actionInsertKeyframe",
+    "value": "Ctrl+Shift+E",
+    "type": "text"
+  },
+  {
+    "category": "Keyboard",
+    "title": "Save Current Frame",
+    "restart": true,
+    "setting": "actionSaveFrame",
+    "value": "",
+    "type": "text"
+  },
+  {
+    "category": "Keyboard",
+    "title": "Nudge left",
+    "restart": true,
+    "setting": "nudgeLeft",
+    "value": "Shift+Left",
+    "type": "text"
+  },
+  {
+    "category": "Keyboard",
+    "title": "Nudge right",
+    "restart": true,
+    "setting": "nudgeRight",
+    "value": "Shift+Right",
     "type": "text"
   }
 ]

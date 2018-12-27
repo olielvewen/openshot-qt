@@ -5,7 +5,7 @@
  
  @section LICENSE
  
- Copyright (c) 2008-2016 OpenShot Studios, LLC
+ Copyright (c) 2008-2018 OpenShot Studios, LLC
  (http://www.openshotstudios.com). This file is part of
  OpenShot Video Editor (http://www.openshot.org), an open-source project
  dedicated to delivering high quality video editing and animation solutions
@@ -110,7 +110,7 @@ class TestQueryClass(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         "Hook method for deconstructing the class fixture after running all tests in the class."
-        print ('Exiting Unittests: Quiting QApplication')
+        print ('Exiting Unittests: Quitting QApplication')
         TestQueryClass.app.window.actionQuit.trigger()
 
     def test_add_clip(self):
